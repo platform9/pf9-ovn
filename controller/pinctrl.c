@@ -3355,6 +3355,8 @@ pinctrl_handler(void *arg_)
     swconn = rconn_create(0, 0, DSCP_DEFAULT, 1 << OFP15_VERSION);
 
     while (!latch_is_set(&pctrl->pinctrl_thread_exit)) {
+        ovsrcu_quiesce_end();
+
         long long int bfd_time = LLONG_MAX;
 
         ovs_mutex_lock(&pinctrl_mutex);
@@ -3414,6 +3416,8 @@ pinctrl_handler(void *arg_)
         seq_wait(pinctrl_handler_seq, new_seq);
 
         latch_wait(&pctrl->pinctrl_thread_exit);
+
+        ovsrcu_quiesce_start();
         poll_block();
     }
 

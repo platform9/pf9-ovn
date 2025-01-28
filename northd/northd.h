@@ -160,6 +160,7 @@ struct northd_data {
     struct northd_tracked_data trk_data;
 };
 
+struct lflow_ref;
 struct lr_nat_table;
 
 struct lflow_input {
@@ -169,8 +170,6 @@ struct lflow_input {
     /* Southbound table references */
     const struct sbrec_bfd_table *sbrec_bfd_table;
     const struct sbrec_logical_flow_table *sbrec_logical_flow_table;
-    const struct sbrec_multicast_group_table *sbrec_multicast_group_table;
-    const struct sbrec_igmp_group_table *sbrec_igmp_group_table;
     const struct sbrec_logical_dp_group_table *sbrec_logical_dp_group_table;
 
     /* Indexes */
@@ -190,6 +189,8 @@ struct lflow_input {
     const struct hmap *svc_monitor_map;
     bool ovn_internal_version_changed;
     const char *svc_monitor_mac;
+    struct hmap *igmp_groups;
+    struct lflow_ref *igmp_lflow_ref;
 };
 
 extern int parallelization_state;
@@ -807,5 +808,8 @@ lsp_is_router(const struct nbrec_logical_switch_port *nbsp)
 }
 
 struct ovn_port *ovn_port_find(const struct hmap *ports, const char *name);
-
+void build_igmp_lflows(struct hmap *igmp_groups,
+                       const struct hmap *ls_datapaths,
+                       struct lflow_table *lflows,
+                       struct lflow_ref *lflow_ref);
 #endif /* NORTHD_H */

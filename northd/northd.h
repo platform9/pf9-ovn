@@ -785,4 +785,28 @@ lr_has_multiple_gw_ports(const struct ovn_datapath *od)
 
 uint32_t get_ovn_max_dp_key_local(const struct sbrec_chassis_table *);
 
+/* Returns true if the logical router port 'enabled' column is empty or
+ * set to true.  Otherwise, returns false. */
+static inline bool
+lrport_is_enabled(const struct nbrec_logical_router_port *lrport)
+{
+    return !lrport->enabled || *lrport->enabled;
+}
+
+/* Returns true if the logical switch port 'enabled' column is empty or
+ * set to true.  Otherwise, returns false. */
+static inline bool
+lsp_is_enabled(const struct nbrec_logical_switch_port *lsp)
+{
+    return !lsp->n_enabled || *lsp->enabled;
+}
+
+static inline bool
+lsp_is_router(const struct nbrec_logical_switch_port *nbsp)
+{
+    return !strcmp(nbsp->type, "router");
+}
+
+struct ovn_port *ovn_port_find(const struct hmap *ports, const char *name);
+
 #endif /* NORTHD_H */

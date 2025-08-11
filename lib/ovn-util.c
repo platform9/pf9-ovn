@@ -30,6 +30,7 @@
 #include "socket-util.h"
 #include "svec.h"
 #include "unixctl.h"
+#include "ovs_compat.h"
 
 VLOG_DEFINE_THIS_MODULE(ovn_util);
 
@@ -735,7 +736,7 @@ ip_address_and_port_from_lb_key(const char *key, char **ip_address,
                                 uint16_t *port, int *addr_family)
 {
     struct sockaddr_storage ss;
-    if (!inet_parse_active(key, 0, &ss, false, NULL)) {
+    if (!PARSE_ACTIVE(key, 0, &ss, false)) {
         static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 1);
         VLOG_WARN_RL(&rl, "bad ip address or port for load balancer key %s",
                      key);

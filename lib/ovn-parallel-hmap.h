@@ -33,6 +33,38 @@ extern "C" {
 #include "openvswitch/hmap.h"
 #include "openvswitch/thread.h"
 #include "ovs-atomic.h"
+#include "openvswitch/hmap.h"
+
+/* If OVS already provides parallel hmap helpers, use those and skip OVN defs. */
+#if defined(OVS_HAS_PARALLEL_HMAP)
+/* Nothing to do: rely on OVS-provided macros. */
+
+/* If a separate multivar-based implementation exists, it should be
+ * selected here (INIT_MULTIVAR defined). We intentionally do not
+ * attempt to use it in this fallback header. */
+#elif defined(INIT_MULTIVAR)
+/* Intentionally empty: project-specific parallel impl may be provided elsewhere. */
+
+#else  /* !OVS_HAS_PARALLEL_HMAP && !INIT_MULTIVAR */
+/* ---------------------------------------------------------------------
+ * Single-threaded fallback: ignore JOBID and map to standard iterators.
+ *
+ * IMPORTANT: expand as a loop *header*, not a statement, so call sites
+ * can immediately follow with '{ ... }'.
+ * --------------------------------------------------------------------- */
+#  ifdef HMAP_FOR_EACH_IN_PARALLEL
+#    undef HMAP_FOR_EACH_IN_PARALLEL
+#  endif
+#  ifdef HMAP_FOR_EACH_IN_PARALLEL_SAFE
+#    undef HMAP_FOR_EACH_IN_PARALLEL_SAFE
+#  endif
+
+#  define HMAP_FOR_EACH_IN_PARALLEL(NODE, MEMBER, JOBID, HMAP) \
+         HMAP_FOR_EACH(NODE, MEMBER, HMAP)
+
+#  define HMAP_FOR_EACH_IN_PARALLEL_SAFE(NODE, NEXT, MEMBER, JOBID, HMAP) \
+         HMAP_FOR_EACH_SAFE(NODE, NEXT, MEMBER, HMAP)
+#endif /* feature selection */
 
 /* Process this include only if OVS does not supply parallel definitions
  */
@@ -58,11 +90,13 @@ extern "C" {
  * ThreadID + step * i as the JOBID parameter.
  */
 
+/*
 #define HMAP_FOR_EACH_IN_PARALLEL(NODE, MEMBER, JOBID, HMAP)                \
    for (INIT_MULTIVAR(NODE, MEMBER, hmap_first_in_bucket_num(HMAP, JOBID),  \
                       struct hmap_node);                                    \
         CONDITION_MULTIVAR(NODE, MEMBER, ITER_VAR(NODE) != NULL);           \
-        UPDATE_MULTIVAR(NODE, hmap_next_in_bucket(ITER_VAR(NODE))))
+        UPDATE_MULTIVAR(NODE, hmap_next_in_bucket(ITER_VAR(NODE)))) 
+*/
 
 /* We do not have a SAFE version of the macro, because the hash size is not
  * atomic and hash removal operations would need to be wrapped with

@@ -4287,8 +4287,8 @@ run_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn,
 
     long long now = time_msec();
 
-    struct mac_binding *mb;
-    HMAP_FOR_EACH_SAFE (mb, hmap_node, &put_mac_bindings) {
+    struct mac_binding *mb, *next;
+    HMAP_FOR_EACH_SAFE (mb, next, hmap_node, &put_mac_bindings) {
         if (ovn_mac_binding_can_commit(mb, now)) {
             run_put_mac_binding(ovnsb_idl_txn,
                                 sbrec_datapath_binding_by_key,

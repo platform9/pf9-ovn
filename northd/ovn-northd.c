@@ -41,6 +41,7 @@
 #include "unixctl.h"
 #include "util.h"
 #include "openvswitch/vlog.h"
+#include "ovs_compat.h"
 
 VLOG_DEFINE_THIS_MODULE(ovn_northd);
 
@@ -744,6 +745,7 @@ main(int argc, char *argv[])
     struct ovsdb_idl_loop ovnsb_idl_loop = OVSDB_IDL_LOOP_INITIALIZER(
         ovsdb_idl_create(ovnsb_db, &sbrec_idl_class, true, true));
     ovsdb_idl_track_add_all(ovnsb_idl_loop.idl);
+    /* Call when available (newer OVS); safe no-op on older OVS. */
     ovsdb_idl_set_write_changed_only_all(ovnsb_idl_loop.idl, true);
 
     /* Disable alerting for pure write-only columns. */

@@ -47,6 +47,7 @@
 #include "unixctl.h"
 #include "util.h"
 #include "openvswitch/vlog.h"
+#include "ovs_compat.h"
 
 VLOG_DEFINE_THIS_MODULE(nbctl);
 
@@ -2863,7 +2864,7 @@ nbctl_lb_add(struct ctl_context *ctx)
     }
 
     struct sockaddr_storage ss_vip;
-    if (!inet_parse_active(lb_vip, 0, &ss_vip, false, NULL)) {
+    if (!PARSE_ACTIVE(lb_vip, 0, &ss_vip, false)) {
         ctl_error(ctx, "%s: should be an IP address (or an IP address "
                   "and a port number with : as a separator).", lb_vip);
         return;
@@ -2893,7 +2894,7 @@ nbctl_lb_add(struct ctl_context *ctx)
         struct sockaddr_storage ss_dst;
 
         if (lb_vip_port) {
-            if (!inet_parse_active(token, -1, &ss_dst, false, NULL)) {
+            if (!PARSE_ACTIVE(token, -1, &ss_dst, false)) {
                 ctl_error(ctx, "%s: should be an IP address and a port "
                           "number with : as a separator.", token);
                 goto out;
@@ -3039,7 +3040,7 @@ lb_info_add_smap(const struct nbrec_load_balancer *lb,
             const struct smap_node *node = nodes[i];
 
             struct sockaddr_storage ss;
-            if (!inet_parse_active(node->key, 0, &ss, false, NULL)) {
+            if (!PARSE_ACTIVE(node->key, 0, &ss, false)) {
                 continue;
             }
 

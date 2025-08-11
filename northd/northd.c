@@ -7520,6 +7520,26 @@ lrouter_port_ipv6_reachable(const struct ovn_port *op,
     return false;
 }
 
+
+static bool
+port_is_l2_only_port(const struct ovn_port *op)
+{
+    /* Check that the ovn_port struct and its associated logical switch
+     * port are valid. */
+    if (!op || !op->nbsp) {
+        return false;
+    }
+
+    /* A port is considered L2-only if it has an unknown address
+     * and port security is disabled.
+     */
+    bool has_no_fixed_ip = op->has_unknown;
+    bool has_port_security_disabled = (op->nbsp->n_port_security == 0);
+
+    return has_no_fixed_ip && has_port_security_disabled;
+}
+
+
 /*
  * Ingress table 24: Flows that forward ARP/ND requests only to the routers
  * that own the addresses. Other ARP/ND packets are still flooded in the
@@ -7539,7 +7559,8 @@ build_lswitch_rport_arp_req_flow(const char *ips,
     /* Send a the packet to the router pipeline.  If the switch has non-router
      * ports then flood it there as well.
      */
-    if (od->n_router_ports != od->nbs->n_ports) {
+    if (od->n_router_ports != od->nbs->n_ports 
+           || port_is_l2_only_port(patch_op)) {
         ds_put_format(&actions, "clone {outport = %s; output; }; "
                                 "outport = \""MC_FLOOD_L2"\"; output;",
                       patch_op->json_key);

@@ -728,8 +728,8 @@ update_ct_zones(const struct sset *local_lports,
          * that zone is being explicitly requested now.
          */
         if (bitmap_is_set(unreq_snat_zones_map, snat_req_node->data)) {
-            struct simap_node *unreq_node;
-            SIMAP_FOR_EACH_SAFE (unreq_node, &unreq_snat_zones) {
+            struct simap_node *unreq_node, *next;
+            SIMAP_FOR_EACH_SAFE (unreq_node, next, &unreq_snat_zones) {
                 if (unreq_node->data == snat_req_node->data) {
                     simap_find_and_delete(ct_zones, unreq_node->name);
                     simap_delete(&unreq_snat_zones, unreq_node);

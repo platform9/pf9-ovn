@@ -47,6 +47,7 @@
 #include "unixctl.h"
 #include "util.h"
 #include "random.h"
+#include "ovs_compat.h"
 
 VLOG_DEFINE_THIS_MODULE(ovntrace);
 
@@ -218,7 +219,7 @@ static void
 parse_lb_option(const char *s)
 {
     struct sockaddr_storage ss;
-    if (!inet_parse_active(s, 0, &ss, false, NULL)) {
+    if (!PARSE_ACTIVE(s, 0, &ss, false)) {
         ovs_fatal(0, "%s: bad address", s);
     }
 

@@ -85,8 +85,8 @@ static void
 cleanup_claimed_port_timestamps(void)
 {
     long long int now = time_msec();
-    struct shash_node *node;
-    SHASH_FOR_EACH_SAFE (node, &_claimed_ports) {
+    struct shash_node *node, *next;
+    SHASH_FOR_EACH_SAFE (node, next, &_claimed_ports) {
         struct claimed_port *cp = (struct claimed_port *) node->data;
         if (now - cp->last_claimed >= 5 * CLAIM_TIME_THRESHOLD_MS) {
             free(cp);

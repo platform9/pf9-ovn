@@ -41,6 +41,7 @@
 #include "uuid.h"
 #include "socket-util.h"
 #include "lib/ovn-util.h"
+#include "ovs_compat.h"
 
 VLOG_DEFINE_THIS_MODULE(actions);
 
@@ -2519,7 +2520,7 @@ validate_empty_lb_backends(struct action_context *ctx,
 
         switch (o->option->code) {
         case EMPTY_LB_VIP:
-            if (!inet_parse_active(c->string, 0, &ss, false, NULL)) {
+            if (!PARSE_ACTIVE(c->string, 0, &ss, false)) {
                 lexer_error(ctx->lexer, "Invalid load balancer VIP '%s'",
                             c->string);
                 return;

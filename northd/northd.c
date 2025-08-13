@@ -7524,19 +7524,23 @@ lrouter_port_ipv6_reachable(const struct ovn_port *op,
 static bool
 port_is_l2_only_port(const struct ovn_port *op)
 {
-    /* Check that the ovn_port struct and its associated logical switch
-     * port are valid. */
-    if (!op || !op->nbsp) {
-        return false;
-    }
+     /* Check that the ovn_port struct and its associated logical switch
+      * port are valid. */
+     if (!op || !op->nbsp) {
+         VLOG_INFO("port_is_l2_only_port: op or op->nbsp is invalid, returning false.");
+         return false;
+     }
 
-    /* A port is considered L2-only if it has an unknown address
-     * and port security is disabled.
-     */
-    bool has_no_fixed_ip = op->has_unknown;
-    bool has_port_security_disabled = (op->nbsp->n_port_security == 0);
+     /* A port is considered L2-only if it has an unknown address
+      * and port security is disabled.
+      */
+     bool has_no_fixed_ip = op->has_unknown;
+     bool has_port_security_disabled = (op->nbsp->n_port_security == 0);
 
-    return has_no_fixed_ip && has_port_security_disabled;
+     VLOG_INFO("port_is_l2_only_port: port_name=%s, has_no_fixed_ip=%s, has_port_security_disabled=%s",
+               op->json_key, has_no_fixed_ip ? "true" : "false", has_port_security_disabled ? "true" : "false");
+
+     return has_no_fixed_ip && has_port_security_disabled;
 }
 
 
@@ -7547,35 +7551,57 @@ port_is_l2_only_port(const struct ovn_port *op)
  */
 static void
 build_lswitch_rport_arp_req_flow(const char *ips,
-    int addr_family, struct ovn_port *patch_op, struct ovn_datapath *od,
-    uint32_t priority, struct hmap *lflows,
-    const struct ovsdb_idl_row *stage_hint)
+     int addr_family, struct ovn_port *patch_op, struct ovn_datapath *od,
+     uint32_t priority, struct hmap *lflows,
+     const struct ovsdb_idl_row *stage_hint)
 {
-    struct ds match   = DS_EMPTY_INITIALIZER;
-    struct ds actions = DS_EMPTY_INITIALIZER;
+     VLOG_INFO("Processing ARP request flow for port %s", patch_op->json_key);
+     struct ds match   = DS_EMPTY_INITIALIZER;
+     struct ds actions = DS_EMPTY_INITIALIZER;
 
-    arp_nd_ns_match(ips, addr_family, &match);
+     // Match based on ARP/NDNS and the specific IP addresses.
+     arp_nd_ns_match(ips, addr_family, &match);
 
-    /* Send a the packet to the router pipeline.  If the switch has non-router
-     * ports then flood it there as well.
-     */
-    if (od->n_router_ports != od->nbs->n_ports 
-           || port_is_l2_only_port(patch_op)) {
-        ds_put_format(&actions, "clone {outport = %s; output; }; "
-                                "outport = \""MC_FLOOD_L2"\"; output;",
-                      patch_op->json_key);
-        ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP,
-                                priority, ds_cstr(&match),
-                                ds_cstr(&actions), stage_hint);
-    } else {
-        ds_put_format(&actions, "outport = %s; output;", patch_op->json_key);
-        ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP, priority,
-                                ds_cstr(&match), ds_cstr(&actions),
-                                stage_hint);
-    }
+     // If the port is an L2-only port, we need to handle ARP broadcasts specifically.
+     if (port_is_l2_only_port(patch_op)) {
+         // Add a new match for ARP broadcast packets on the L2-only port.
 
-    ds_destroy(&match);
-    ds_destroy(&actions);
+         VLOG_INFO("port %s is an L2-only port. Building high-priority ARP flow.", patch_op->json_key);
+
+         ds_put_format(&match, "in_port==%s && arp && arp.tpa==%s && dl_dst==ff:ff:ff:ff:ff:ff",
+                       patch_op->json_key, ips);
+         ds_put_format(&actions, "output:%s, output:\""MC_FLOOD_L2"\"",
+                       patch_op->json_key);
+
+         VLOG_INFO("Built high-priority ARP flow for port %s: match=\"%s\", actions=\"%s\"",
+                      patch_op->json_key, ds_cstr(&match), ds_cstr(&actions));
+
+         // Use a higher priority to ensure this rule is matched before others.
+         ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP,
+                                 priority + 10, ds_cstr(&match), ds_cstr(&actions),
+                                 stage_hint);
+         ds_clear(&match);
+         ds_clear(&actions);
+     }
+
+     /* Send the packet to the router pipeline. If the switch has non-router
+      * ports, then flood it there as well.
+      */
+     arp_nd_ns_match(ips, addr_family, &match);
+
+     if (od->n_router_ports != od->nbs->n_ports) {
+         ds_put_format(&actions, "clone {outport = %s; output; }; "
+                                 "outport = \""MC_FLOOD_L2"\"; output;",
+                                 patch_op->json_key);
+     } else {
+         ds_put_format(&actions, "outport = %s; output;", patch_op->json_key);
+     }
+
+     ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP, priority,
+                             ds_cstr(&match), ds_cstr(&actions), stage_hint);
+
+     ds_destroy(&match);
+     ds_destroy(&actions);
 }
 
 /*
@@ -14258,6 +14284,18 @@ build_lswitch_and_lrouter_flows(const struct hmap *datapaths,
         stopwatch_stop(LFLOWS_DATAPATHS_STOPWATCH_NAME, time_msec());
         stopwatch_start(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
         HMAP_FOR_EACH (op, key_node, ports) {
+            /* OVN_FIX: For L2-only ports, explicitly build ARP/IP flows to prevent drops.
+            * The standard logic may skip these ports, so we handle them here.
+            */
+            if (port_is_l2_only_port(op)) {
+                 VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, building specific flows.", op->json_key);
+                 /* ARP flows */
+                 build_lswitch_rport_arp_req_flow(NULL, AF_INET, op, od, 100, lflows, &op->nbsp->header_);
+                 build_lswitch_rport_arp_req_flow(NULL, AF_INET6, op, od, 100, lflows, &op->nbsp->header_);
+                 /* Continue to the next port to avoid redundant flow generation. */
+                 continue;
+            }
+
             build_lswitch_and_lrouter_iterate_by_op(op, &lsi);
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());

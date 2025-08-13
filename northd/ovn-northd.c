@@ -17,6 +17,8 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <time.h>
 
 #include "lib/chassis-index.h"
 #include "command-line.h"
@@ -675,6 +677,19 @@ get_probe_interval(const char *db, const struct nbrec_nb_global *nb)
     return interval;
 }
 
+ 
+
+static void
+northd_log_startup(int argc, char *argv[])
+{
+    time_t now = time(NULL);
+    VLOG_INFO("northd bootstrap: pid=%ld, start_time=%ld", (long)getpid(), (long)now);
+    if (argc > 0 && argv && argv[0]) {
+        VLOG_INFO("argv[0]=%s", argv[0]);
+    }
+}
+
+
 int
 main(int argc, char *argv[])
 {
@@ -686,6 +701,9 @@ main(int argc, char *argv[])
         .had_lock = false,
         .paused = false
     };
+   
+    northd_log_startup(argc,argv);
+   
 
     fatal_ignore_sigpipe();
     ovs_cmdl_proctitle_init(argc, argv);

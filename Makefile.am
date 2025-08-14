@@ -99,6 +99,7 @@ EXTRA_DIST = \
 	$(MAN_ROOTS) \
 	Vagrantfile \
 	Vagrantfile-FreeBSD \
+        container/Dockerfile \
 	.mailmap \
 	TODO.rst \
 	TODO_SPLIT.rst \

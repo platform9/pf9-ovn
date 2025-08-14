@@ -7568,6 +7568,7 @@ build_lswitch_rport_arp_req_flow(const char *ips,
 
          VLOG_INFO("port %s is an L2-only port. Building high-priority ARP flow.", patch_op->json_key);
 
+         ds_clear(&match);
          ds_put_format(&match, "in_port==%s && arp && arp.tpa==%s && dl_dst==ff:ff:ff:ff:ff:ff",
                        patch_op->json_key, ips);
          ds_put_format(&actions, "output:%s, output:\""MC_FLOOD_L2"\"",
@@ -14288,10 +14289,19 @@ build_lswitch_and_lrouter_flows(const struct hmap *datapaths,
             * The standard logic may skip these ports, so we handle them here.
             */
             if (port_is_l2_only_port(op)) {
+                 struct ovn_datapath *od_for_op = op->od;  /* LS datapath for this port */
+
+                 if (!od_for_op) {
+                     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 10);
+                     VLOG_WARN_RL(&rl, "L2-only port %s has no datapath; skipping ARP flow",
+                                    op->json_key ? op->json_key : "(unknown)");
+                     continue;  /* avoid NULL deref */
+                 }
+
                  VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, building specific flows.", op->json_key);
                  /* ARP flows */
-                 build_lswitch_rport_arp_req_flow(NULL, AF_INET, op, od, 100, lflows, &op->nbsp->header_);
-                 build_lswitch_rport_arp_req_flow(NULL, AF_INET6, op, od, 100, lflows, &op->nbsp->header_);
+                 build_lswitch_rport_arp_req_flow(NULL, AF_INET, op, od_for_op, 100, lflows, &op->nbsp->header_);
+                 build_lswitch_rport_arp_req_flow(NULL, AF_INET6, op, od_for_op, 100, lflows, &op->nbsp->header_);
                  /* Continue to the next port to avoid redundant flow generation. */
                  continue;
             }

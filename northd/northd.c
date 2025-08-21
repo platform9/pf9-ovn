@@ -7569,9 +7569,9 @@ build_lswitch_rport_arp_req_flow(const char *ips,
          VLOG_INFO("port %s is an L2-only port. Building high-priority ARP flow.", patch_op->json_key);
 
          ds_clear(&match);
-         ds_put_format(&match, "in_port==%s && arp && arp.tpa==%s && dl_dst==ff:ff:ff:ff:ff:ff",
-                       patch_op->json_key, ips);
-         ds_put_format(&actions, "output:%s, output:\""MC_FLOOD_L2"\"",
+         ds_put_format(&match, "in_port==%s && arp && dl_dst==ff:ff:ff:ff:ff:ff",
+                       patch_op->json_key);
+         ds_put_format(&actions, "output:%s; output:\""MC_FLOOD_L2"\"",
                        patch_op->json_key);
 
          VLOG_INFO("Built high-priority ARP flow for port %s: match=\"%s\", actions=\"%s\"",
@@ -14176,6 +14176,33 @@ fix_flow_map_size(struct hmap *lflow_map,
     lflow_map->n = total;
 }
 
+/* OVN_FIX: For L2-only ports or ports with disabled port security, add
+ * a bypass flow to prevent drops at table 8 (port security).
+ */
+static void add_l2_portsec_bypass(struct ovn_port *p, struct hmap *lflows)
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
+
+    /* Bypass criteria:
+     * - L2-only port (no L3 address management), or
+     * - Port security disabled (NB: lsp->port_security == []).
+     */
+    if (port_is_l2_only_port(p)) {
+        struct ds match = DS_EMPTY_INITIALIZER;
+
+        /* OVN match syntax: use 'inport', not in_port/dl_* */
+        ds_put_format(&match, "inport == %s", p->json_key);
+
+        /* Let packet proceed to the next stage. */
+        ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_PORT_SEC_L2,
+                                100, ds_cstr(&match), "next;", &p->nbsp->header_);
+        ds_destroy(&match);
+    }
+}
+
+
 static void
 build_lswitch_and_lrouter_flows(const struct hmap *datapaths,
                                 const struct hmap *ports,
@@ -14297,7 +14324,8 @@ build_lswitch_and_lrouter_flows(const struct hmap *datapaths,
                                     op->json_key ? op->json_key : "(unknown)");
                      continue;  /* avoid NULL deref */
                  }
-
+                 VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, bypassing port-sec \n", op->json_key);
+                 add_l2_portsec_bypass(op, lflows);
                  VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, building specific flows.", op->json_key);
                  /* ARP flows */
                  build_lswitch_rport_arp_req_flow(NULL, AF_INET, op, od_for_op, 100, lflows, &op->nbsp->header_);

@@ -7543,12 +7543,29 @@ port_is_l2_only_port(const struct ovn_port *op)
      return has_no_fixed_ip && has_port_security_disabled;
 }
 
+/* Return the logical port key without surrounding quotes.
+ * Uses 'tmp' as scratch if it needs to strip.  Safe to pass a static DS. */
+ static const char *
+ lport_key_unquoted(const char *key, struct ds *tmp)
+ {
+     if (!key) {
+         return "";
+     }
+     size_t len = strlen(key);
+     if (len >= 2 && key[0] == '"' && key[len - 1] == '"') {
+         ds_clear(tmp);
+         ds_put_buffer(tmp, key + 1, len - 2);  // drop leading/trailing "
+         return ds_cstr(tmp);
+     }
+     return key; // already unquoted
+ }
 
 /*
  * Ingress table 24: Flows that forward ARP/ND requests only to the routers
  * that own the addresses. Other ARP/ND packets are still flooded in the
  * switching domain as regular broadcast.
  */
+ #if 0
 static void
 build_lswitch_rport_arp_req_flow(const char *ips,
      int addr_family, struct ovn_port *patch_op, struct ovn_datapath *od,
@@ -7558,6 +7575,10 @@ build_lswitch_rport_arp_req_flow(const char *ips,
      VLOG_INFO("Processing ARP request flow for port %s", patch_op->json_key);
      struct ds match   = DS_EMPTY_INITIALIZER;
      struct ds actions = DS_EMPTY_INITIALIZER;
+     struct ds unq_buf = DS_EMPTY_INITIALIZER;
+
+    /* Ensure we have an unquoted port name for formatting. */
+    const char *port = lport_key_unquoted(patch_op->json_key, &unq_buf);
 
      // Match based on ARP/NDNS and the specific IP addresses.
      arp_nd_ns_match(ips, addr_family, &match);
@@ -7570,9 +7591,13 @@ build_lswitch_rport_arp_req_flow(const char *ips,
 
          ds_clear(&match);
          ds_put_format(&match, "in_port==%s && arp && dl_dst==ff:ff:ff:ff:ff:ff",
-                       patch_op->json_key);
-         ds_put_format(&actions, "output:%s; output:\""MC_FLOOD_L2"\"",
-                       patch_op->json_key);
+                       port);
+        /** ds_put_format(&actions, "output:%s; output:\""MC_FLOOD_L2"\"",
+                       patch_op->json_key); */
+        ds_put_format(&actions,
+                        "clone { outport = \"%s\"; output; }; "
+                        "outport = \"" MC_FLOOD_L2 "\"; output;",
+                        port);
 
          VLOG_INFO("Built high-priority ARP flow for port %s: match=\"%s\", actions=\"%s\"",
                       patch_op->json_key, ds_cstr(&match), ds_cstr(&actions));
@@ -7603,6 +7628,39 @@ build_lswitch_rport_arp_req_flow(const char *ips,
 
      ds_destroy(&match);
      ds_destroy(&actions);
+}
+#endif
+
+static void
+build_lswitch_rport_arp_req_flow(const char *ips,
+    int addr_family, struct ovn_port *patch_op, struct ovn_datapath *od,
+    uint32_t priority, struct hmap *lflows,
+    const struct ovsdb_idl_row *stage_hint)
+{
+    struct ds match   = DS_EMPTY_INITIALIZER;
+    struct ds actions = DS_EMPTY_INITIALIZER;
+
+    arp_nd_ns_match(ips, addr_family, &match);
+
+    /* Send a the packet to the router pipeline.  If the switch has non-router
+     * ports then flood it there as well.
+     */
+    if (od->n_router_ports != od->nbs->n_ports) {
+        ds_put_format(&actions, "clone {outport = %s; output; }; "
+                                "outport = \""MC_FLOOD_L2"\"; output;",
+                      patch_op->json_key);
+        ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP,
+                                priority, ds_cstr(&match),
+                                ds_cstr(&actions), stage_hint);
+    } else {
+        ds_put_format(&actions, "outport = %s; output;", patch_op->json_key);
+        ovn_lflow_add_with_hint(lflows, od, S_SWITCH_IN_L2_LKUP, priority,
+                                ds_cstr(&match), ds_cstr(&actions),
+                                stage_hint);
+    }
+
+    ds_destroy(&match);
+    ds_destroy(&actions);
 }
 
 /*
@@ -7946,7 +8004,7 @@ build_lswitch_flows(const struct hmap *datapaths,
         if (od->has_unknown) {
             ovn_lflow_add(lflows, od, S_SWITCH_IN_L2_UNKNOWN, 50,
                           "outport == \"none\"",
-                          "outport = \""MC_UNKNOWN "\"; output;");
+                          "outport = \""MC_FLOOD_L2 "\"; output;");
         } else {
             ovn_lflow_add(lflows, od, S_SWITCH_IN_L2_UNKNOWN, 50,
                           "outport == \"none\"", "drop;");
@@ -14176,28 +14234,114 @@ fix_flow_map_size(struct hmap *lflow_map,
     lflow_map->n = total;
 }
 
-/* OVN_FIX: For L2-only ports or ports with disabled port security, add
- * a bypass flow to prevent drops at table 8 (port security).
- */
-static void add_l2_portsec_bypass(struct ovn_port *p, struct hmap *lflows)
+/* For L2-only VIFs, send unknown-unicast to the L2 flood group so it reaches
+ * localnet and leaves the box with the proper VLAN. */
+static void
+add_l2only_fallback_flood(struct ovn_port *p, struct hmap *lflows)
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
+    if (!port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    /* Only unknown unicast; don't touch multicast/broadcast. */
+    ds_put_format(&match, "inport == \"%s\" && !eth.mcast", vif);
+    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_L2_LKUP, 50,
+                            ds_cstr(&match),
+                            "outport = \"" MC_FLOOD_L2 "\"; output;",
+                            &p->nbsp->header_);
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
+/* Safety net: ensure egress has a terminal output per outport on this LS.
+ * Low priority so any more specific rules take precedence. */
+static void
+add_out_l2_output_safety_net(struct ovn_datapath *od,
+                             const struct hmap *ports,
+                             struct hmap *lflows)
+{
+    struct ovn_port *op;
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+
+    HMAP_FOR_EACH (op, key_node, ports) {
+        if (!op->od || op->od != od || !op->nbsp) {
+            continue;
+        }
+        const char *name = lport_key_unquoted(op->json_key, &unq);
+        ds_clear(&match);
+        ds_put_format(&match, "outport == \"%s\"", name);
+        ovn_lflow_add_with_hint(lflows, od, S_SWITCH_OUT_QOS_MARK, 50,
+                                ds_cstr(&match), "output;", &op->nbsp->header_);
+    }
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
+
+static void add_portsec_bypass_all(struct ovn_port *p, const struct hmap *ports, struct hmap *lflows)
 {
     if (!p || !p->od || !p->nbsp) {
         return;
     }
 
-    /* Bypass criteria:
-     * - L2-only port (no L3 address management), or
-     * - Port security disabled (NB: lsp->port_security == []).
-     */
     if (port_is_l2_only_port(p)) {
         struct ds match = DS_EMPTY_INITIALIZER;
+        struct ds unq   = DS_EMPTY_INITIALIZER;
+        const char *port = lport_key_unquoted(p->json_key, &unq);
 
-        /* OVN match syntax: use 'inport', not in_port/dl_* */
-        ds_put_format(&match, "inport == %s", p->json_key);
-
-        /* Let packet proceed to the next stage. */
+        /* Ingress: match on inport */
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\"", port);
         ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_PORT_SEC_L2,
                                 100, ds_cstr(&match), "next;", &p->nbsp->header_);
+        ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_PORT_SEC_IP,
+                                100, ds_cstr(&match), "next;", &p->nbsp->header_);
+
+        /* Egress: match on outport (FIXED) */
+        ds_clear(&match);
+        ds_put_format(&match, "outport == \"%s\"", port);
+        ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_PORT_SEC_L2,
+                                100, ds_cstr(&match), "next;", &p->nbsp->header_);
+        ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_PORT_SEC_IP,
+                                100, ds_cstr(&match), "next;", &p->nbsp->header_);
+
+        struct ovn_port *q;
+        HMAP_FOR_EACH (q, key_node, ports) {
+            if ( !q->od || q->od != p->od || !q->nbsp || !q->nbsp->type) continue;
+        
+            const char *t = q->nbsp->type;
+            if (!strcmp(t, "localnet") || !strcmp(t, "patch") || !strcmp(t, "router") || !strcmp(t, "vtep")) {
+                struct ds unq2 = DS_EMPTY_INITIALIZER;
+                const char *name = lport_key_unquoted(q->json_key, &unq2);
+        
+                ds_clear(&match);
+                ds_put_format(&match, "inport == \"%s\"", name);
+                ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_PORT_SEC_L2, 100,
+                                        ds_cstr(&match), "next;", &q->nbsp->header_);
+                ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_PORT_SEC_IP, 100,
+                                        ds_cstr(&match), "next;", &q->nbsp->header_);
+        
+                ds_clear(&match);
+                ds_put_format(&match, "outport == \"%s\"", name);
+                ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_PORT_SEC_L2, 100,
+                                        ds_cstr(&match), "next;", &q->nbsp->header_);
+                ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_PORT_SEC_IP, 100,
+                                        ds_cstr(&match), "next;", &q->nbsp->header_);
+        
+                ds_destroy(&unq2);
+            }
+        }
+        ds_destroy(&unq);
         ds_destroy(&match);
     }
 }
@@ -14325,18 +14469,19 @@ build_lswitch_and_lrouter_flows(const struct hmap *datapaths,
                      continue;  /* avoid NULL deref */
                  }
                  VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, bypassing port-sec \n", op->json_key);
-                 add_l2_portsec_bypass(op, lflows);
+                 add_portsec_bypass_all(op, ports, lflows);
+                 add_l2only_fallback_flood(op, lflows);
                  VLOG_INFO("build_lswitch_and_lrouter_flows: Found L2-only port %s, building specific flows.", op->json_key);
-                 /* ARP flows */
-                 build_lswitch_rport_arp_req_flow(NULL, AF_INET, op, od_for_op, 100, lflows, &op->nbsp->header_);
-                 build_lswitch_rport_arp_req_flow(NULL, AF_INET6, op, od_for_op, 100, lflows, &op->nbsp->header_);
-                 /* Continue to the next port to avoid redundant flow generation. */
-                 continue;
             }
 
             build_lswitch_and_lrouter_iterate_by_op(op, &lsi);
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
+        stopwatch_start("LFLOWS_EGRESS_SAFETY", time_msec());
+        HMAP_FOR_EACH (od, key_node, datapaths) {
+            add_out_l2_output_safety_net(od, ports, lflows);   // ensures S_SWITCH_OUT_L2_LKUP has 'output;'
+        }
+        stopwatch_stop("LFLOWS_EGRESS_SAFETY", time_msec());
         stopwatch_start(LFLOWS_LBS_STOPWATCH_NAME, time_msec());
         HMAP_FOR_EACH (lb, hmap_node, lbs) {
             build_lswitch_arp_nd_service_monitor(lb, lsi.lflows,

@@ -8138,6 +8138,16 @@ lrouter_port_ipv6_reachable(const struct ovn_port *op,
     return false;
 }
 
+/* True for VM/container VIFs (empty type) and "virtual" children; false for infra. */
+static bool
+is_vif_lsp(const struct nbrec_logical_switch_port *nbsp)
+{
+    if (!nbsp || !nbsp->type) {
+        return true; /* NULL type means "" in NB schema */
+    }
+    return !nbsp->type[0] || !strcmp(nbsp->type, "virtual");
+}
+
 /* Returns true if a VIF should be treated as L2-only (no L3 addressing and
  * port security disabled). This matches the common "unknown addresses" +
  * empty port_security case. */
@@ -8148,6 +8158,12 @@ port_is_l2_only_port(const struct ovn_port *op)
         VLOG_INFO("port_is_l2_only_port: invalid op=%p op->nbsp=%p", op, op ? op->nbsp : NULL);
         return false;
     }
+
+        /* Only consider true VIF ports. */
+    if (!is_vif_lsp(op->nbsp)) {
+        return false;
+    }
+
 
     bool has_no_fixed_ip = op->has_unknown;
     bool port_sec_off = (op->nbsp->n_port_security == 0);
@@ -8177,24 +8193,20 @@ lport_key_unquoted(const char *key, struct ds *tmp)
     return key; /* already unquoted */
 }
 
-
 /*
  * Ingress table 25: Flows that forward ARP/ND requests only to the routers
  * that own the addresses. Other ARP/ND packets are still flooded in the
 @ -15940,6 +15982,101 @@ fix_flow_table_size(struct lflow_table *lflow_table,
     lflow_table_set_size(lflow_table, total);
 }
-
-/* For L2-only VIFs, provide an UNKNOWN-UNICAST fallback at the *egress*
- * L2 lookup stage. This keeps multicast/broadcast unchanged and lets any
- * more specific rules (ACLs/port-sec/QoS) run before we egress. */
+ * For L2-only VIFs, flood traffic at the *egress* L2 lookup stage.
+ * This preserves the standard egress path (incl. VLAN push on localnet/TAP).
+ * If multicast snooping is enabled, skip eth.mcast so normal snooping rules
+ * control it; otherwise flood mcast too. */
 static void
-add_l2only_uu_fallback(struct ovn_port *p, struct hmap *lflows)
+add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
 {
-    if (!p || !p->od || !p->nbsp) {
-        return;
-    }
-    if (!port_is_l2_only_port(p)) {
+    if (!p || !p->od || !p->nbsp || !port_is_l2_only_port(p)) {
         return;
     }
 
@@ -8202,14 +8214,15 @@ add_l2only_uu_fallback(struct ovn_port *p, struct hmap *lflows)
     struct ds unq   = DS_EMPTY_INITIALIZER;
     const char *vif = lport_key_unquoted(p->json_key, &unq);
 
-    /* Low priority so normal unicast resolution (if present) wins.
-     * We only exclude multicast; broadcast remains handled by the usual
-     * flood rules in this stage. */
+    /* Flood everything EXCEPT multicast (keeps IGMP/MLD scoping). */
     ds_put_format(&match, "inport == \"%s\" && !eth.mcast", vif);
-    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_L2_LKUP, 10,
+
+    ovn_lflow_add_with_hint(lflows, p->od,
+                            S_SWITCH_IN_L2_LKUP,
+                            120,
                             ds_cstr(&match),
                             "outport = \"" MC_FLOOD_L2 "\"; output;",
-                            &p->nbsp->header_, __func__);
+                            &p->nbsp->header_, NULL);
 
     ds_destroy(&unq);
     ds_destroy(&match);
@@ -8220,7 +8233,8 @@ add_l2only_uu_fallback(struct ovn_port *p, struct hmap *lflows)
  * - Keeps stage ordering intact (still runs later stages).
  * - Does not touch infra ports or other VIFs. */
 static void
-add_minimal_portsec_bypass(struct ovn_port *p, struct hmap *lflows)
+add_minimal_portsec_bypass(struct ovn_port *p, struct hmap *lflows) 
+                           
 {
     if (!p || !p->od || !p->nbsp) {
         return;
@@ -8237,20 +8251,20 @@ add_minimal_portsec_bypass(struct ovn_port *p, struct hmap *lflows)
     ds_put_format(&match, "inport == \"%s\"", vif);
     ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_CHECK_PORT_SEC,
                             100, ds_cstr(&match), "next;",
-                            &p->nbsp->header_, __func__);
+                            &p->nbsp->header_, NULL);
     ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_APPLY_PORT_SEC,
                             100, ds_cstr(&match), "next;",
-                            &p->nbsp->header_, __func__);
+                            &p->nbsp->header_, NULL);
 
     /* Egress: same idea but keyed on outport. */
     ds_clear(&match);
     ds_put_format(&match, "outport == \"%s\"", vif);
     ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_CHECK_PORT_SEC,
                             100, ds_cstr(&match), "next;",
-                            &p->nbsp->header_, __func__);
+                            &p->nbsp->header_, NULL);
     ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_APPLY_PORT_SEC,
-                            100, ds_cstr(&match), "next;",
-                            &p->nbsp->header_, __func__);
+                            100, ds_cstr(&match), "output;",
+                            &p->nbsp->header_, NULL);
 
     ds_destroy(&unq);
     ds_destroy(&match);
@@ -16204,7 +16218,7 @@ build_lswitch_and_lrouter_flows(
             VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
                       op->json_key);
             add_minimal_portsec_bypass(op, lsi.lflows);
-            add_l2only_uu_fallback(op, lsi.lflows);
+            add_l2only_flood_all(op, lsi.lflows);
         }
 
         stopwatch_start(LFLOWS_LBS_STOPWATCH_NAME, time_msec());

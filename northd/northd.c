@@ -8138,6 +8138,7 @@ lrouter_port_ipv6_reachable(const struct ovn_port *op,
     return false;
 }
 
+/* PF9 start */
 /* True for VM/container VIFs (empty type) and "virtual" children; false for infra. */
 static bool
 is_vif_lsp(const struct nbrec_logical_switch_port *nbsp)
@@ -16220,6 +16221,7 @@ build_lswitch_and_lrouter_flows(
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
         }
+/* PF9 stop */
 
         stopwatch_start(LFLOWS_LBS_STOPWATCH_NAME, time_msec());
         HMAP_FOR_EACH (lb_dps, hmap_node, lb_dps_map) {

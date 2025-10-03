@@ -16200,7 +16200,6 @@ build_lswitch_and_lrouter_flows(
                                               &lsi.actions,
                                               lsi.lflows);
         }
-        stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
 
         /* Handle L2-only VIFs:
          * - minimally bypass port security for that port only
@@ -16221,6 +16220,7 @@ build_lswitch_and_lrouter_flows(
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
         }
+        stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
 /* PF9 stop */
 
         stopwatch_start(LFLOWS_LBS_STOPWATCH_NAME, time_msec());

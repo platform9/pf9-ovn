@@ -8,10 +8,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
  && rm -rf /var/lib/apt/lists/*
 
-# OVS runtime libs from your build context (provide libopenvswitch*/libvtep* here)
-COPY ovs-libs/ /usr/lib/x86_64-linux-gnu/
-RUN ldconfig || true
-
 # OVN packages produced by your CI
 COPY pkgs/ /tmp/pkgs/
 

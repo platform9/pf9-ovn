@@ -85,6 +85,7 @@ EXTRA_DIST = \
 	MAINTAINERS.rst \
 	README.rst \
 	NOTICE \
+	Dockerfile \
 	.cirrus.yml \
 	.ci/ci.sh \
 	.ci/linux-build.sh \

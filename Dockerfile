@@ -10,9 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
   && rm -rf /var/lib/apt/lists/*
 
-COPY ovs-libs/ /usr/lib/x86_64-linux-gnu/
-RUN ldconfig || true
-
 # Copy built packages from the build context
 COPY pkgs/*.deb /tmp/pkgs/
 

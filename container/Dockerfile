@@ -25,7 +25,7 @@ RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/s
 
 
 RUN mkdir -p /usr/libexec/cni/
-COPY ovnkube ovn-kube-util ovndbchecker hybrid-overlay-node ovnkube-identity ovnkube-observ /usr/bin/
+COPY ovnkube ovn-kube-util ovndbchecker ovnkube-identity ovnkube-observ /usr/bin/
 COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment
@@ -35,8 +35,6 @@ COPY ovndb-raft-functions.sh /root/
 # override the pkg's ovn_k8s.conf with this local copy
 COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
-# copy git commit number into image
-COPY git_info /root
 
 # iptables wrappers
 COPY ./iptables-scripts/iptables /usr/sbin/

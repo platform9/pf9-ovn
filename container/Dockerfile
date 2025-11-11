@@ -28,25 +28,25 @@ RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/s
     # ovn_k8s.conf
     # iptables-scripts/
 
-RUN mkdir -p /usr/libexec/cni/
-COPY ovnkube ovn-kube-util ovndbchecker ovnkube-identity ovnkube-observ /usr/bin/
-COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
+# RUN mkdir -p /usr/libexec/cni/
+# COPY ovnkube ovn-kube-util ovndbchecker ovnkube-identity ovnkube-observ /usr/bin/
+# COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment
 # variables to direct operation and configure ovn
-COPY ovnkube.sh /root/
-COPY ovndb-raft-functions.sh /root/
-# override the pkg's ovn_k8s.conf with this local copy
-COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
+# COPY ovnkube.sh /root/
+# COPY ovndb-raft-functions.sh /root/
+# # override the pkg's ovn_k8s.conf with this local copy
+# COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
 
 
-# iptables wrappers
-COPY ./iptables-scripts/iptables /usr/sbin/
-COPY ./iptables-scripts/iptables-save /usr/sbin/
-COPY ./iptables-scripts/iptables-restore /usr/sbin/
-COPY ./iptables-scripts/ip6tables /usr/sbin/
-COPY ./iptables-scripts/ip6tables-save /usr/sbin/
-COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
+# # iptables wrappers
+# COPY ./iptables-scripts/iptables /usr/sbin/
+# COPY ./iptables-scripts/iptables-save /usr/sbin/
+# COPY ./iptables-scripts/iptables-restore /usr/sbin/
+# COPY ./iptables-scripts/ip6tables /usr/sbin/
+# COPY ./iptables-scripts/ip6tables-save /usr/sbin/
+# COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 
 RUN install -d -m 0755 /var/lib/ovn /var/log/ovn /etc/ovn

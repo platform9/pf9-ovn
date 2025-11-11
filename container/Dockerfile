@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     iproute2 iptables \
     libssl3 libunbound8 libunwind8 libjson-c5 libevent-2.1-7 libsystemd0 \
-    procps \
+    procps curl \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy built packages from the build context

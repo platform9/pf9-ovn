@@ -19,10 +19,14 @@ RUN apt-get update \
 && dpkg -i /tmp/pkgs/*.deb \
 && rm -rf /var/lib/apt/lists/* /tmp/pkgs
 
-
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
   && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
 
+# The following files/directories get copied from `pf9-ovn-kubernetes/dist/images`:
+    # ovnkube.sh
+    # ovndb-raft-functions.sh
+    # ovn_k8s.conf
+    # iptables-scripts/
 
 RUN mkdir -p /usr/libexec/cni/
 COPY ovnkube ovn-kube-util ovndbchecker ovnkube-identity ovnkube-observ /usr/bin/

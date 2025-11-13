@@ -28,8 +28,9 @@ RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/s
     # ovn_k8s.conf
     # iptables-scripts/
 
-# RUN mkdir -p /usr/libexec/cni/
-# COPY ovnkube ovn-kube-util ovndbchecker ovnkube-identity ovnkube-observ /usr/bin/
+# RUNmkdir -p /usr/libexec/cni/
+# NOT copying: ovnkube ovndbchecker ovnkube-identity ovnkube-observ 
+COPY  ovn-kube-util /usr/bin/
 # COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
 
 # ovnkube.sh is the entry point. This script examines environment

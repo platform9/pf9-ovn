@@ -1,14 +1,16 @@
 [Unit]
-Description=Open Virtual Network host components
-After=network.target
-Requires=network.target
-Wants=ovn-controller.service
+Description=OVN controller daemon
+After=syslog.target
+Requires=openvswitch.service
+After=openvswitch.service
 
 [Service]
-Type=oneshot
-ExecStart=/bin/true
-ExecStop=/bin/true
-RemainAfterExit=yes
+Type=forking
+PIDFile=/var/run/ovn/ovn-controller.pid
+Restart=on-failure
+EnvironmentFile=-/etc/default/ovn-host
+ExecStart=/usr/share/ovn/scripts/ovn-ctl --no-monitor --ovn-manage-ovsdb=no start_controller $OVN_CTL_OPTS
+ExecStop=/usr/share/ovn/scripts/ovn-ctl stop_controller --no-monitor
 
 [Install]
 WantedBy=multi-user.target

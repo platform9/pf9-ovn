@@ -19,7 +19,6 @@ EXTRA_DIST += \
 	debian/ovn-common.postinst \
 	debian/ovn-common.postrm \
 	debian/ovn-host.dirs \
-	debian/ovn-host.ovn-controller.service \
 	debian/ovn-host.service \
 	debian/ovn-host.install \
 	debian/ovn-host.manpages \

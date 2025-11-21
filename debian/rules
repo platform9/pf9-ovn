@@ -71,6 +71,14 @@ override_dh_usrlocal:
 override_dh_installman:
 	dh_installman --language=C
 
+override_dh_systemd_enable:
+	dh_systemd_enable -povn-host --name=ovn-controller
+	dh_systemd_enable
+
+override_dh_systemd_start:
+	dh_systemd_start --restart-after-upgrade -povn-host --name=ovn-controller
+	dh_systemd_start --restart-after-upgrade
+
 override_dh_installsystemd:
 	dh_installsystemd --restart-after-upgrade -povn-host --name=ovn-controller
 	dh_installsystemd --restart-after-upgrade

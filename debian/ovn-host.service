@@ -1,12 +1,9 @@
 [Unit]
 Description=OVN controller daemon
-After=syslog.target
-Requires=openvswitch.service
-After=openvswitch.service
+After=network.target openvswitch-switch.service
 
 [Service]
 Type=forking
-PIDFile=/var/run/ovn/ovn-controller.pid
 Restart=on-failure
 EnvironmentFile=-/etc/default/ovn-host
 ExecStart=/usr/share/ovn/scripts/ovn-ctl --no-monitor --ovn-manage-ovsdb=no start_controller $OVN_CTL_OPTS

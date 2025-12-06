@@ -1,0 +1,13 @@
+[Unit]
+Description=OVN controller daemon
+After=network.target openvswitch-switch.service
+
+[Service]
+Type=forking
+Restart=on-failure
+EnvironmentFile=-/etc/default/ovn-host
+ExecStart=/usr/share/ovn/scripts/ovn-ctl --no-monitor --ovn-manage-ovsdb=no start_controller $OVN_CTL_OPTS
+ExecStop=/usr/share/ovn/scripts/ovn-ctl stop_controller --no-monitor
+
+[Install]
+WantedBy=multi-user.target

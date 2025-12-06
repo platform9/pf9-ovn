@@ -8138,6 +8138,141 @@ lrouter_port_ipv6_reachable(const struct ovn_port *op,
     return false;
 }
 
+/* PF9 start */
+/* True for VM/container VIFs (empty type) and "virtual" children; false for infra. */
+static bool
+is_vif_lsp(const struct nbrec_logical_switch_port *nbsp)
+{
+    if (!nbsp || !nbsp->type) {
+        return true; /* NULL type means "" in NB schema */
+    }
+    return !nbsp->type[0] || !strcmp(nbsp->type, "virtual");
+}
+
+/* Returns true if a VIF should be treated as L2-only (no L3 addressing and
+ * port security disabled). This matches the common "unknown addresses" +
+ * empty port_security case. */
+static bool
+port_is_l2_only_port(const struct ovn_port *op)
+{
+    if (!op || !op->nbsp) {
+        VLOG_INFO("port_is_l2_only_port: invalid op=%p op->nbsp=%p", op, op ? op->nbsp : NULL);
+        return false;
+    }
+
+        /* Only consider true VIF ports. */
+    if (!is_vif_lsp(op->nbsp)) {
+        return false;
+    }
+
+
+    bool has_no_fixed_ip = op->has_unknown;
+    bool port_sec_off = (op->nbsp->n_port_security == 0);
+
+    VLOG_DBG("port_is_l2_only_port: %s has_no_fixed_ip=%s port_sec_off=%s",
+             op->json_key,
+             has_no_fixed_ip ? "true" : "false",
+             port_sec_off ? "true" : "false");
+
+    return has_no_fixed_ip && port_sec_off;
+}
+
+/* Return the logical port key without surrounding quotes.
+ * Uses 'tmp' as scratch if it needs to strip.  Safe to pass a static DS. */
+static const char *
+lport_key_unquoted(const char *key, struct ds *tmp)
+{
+    if (!key) {
+        return "";
+    }
+    size_t len = strlen(key);
+    if (len >= 2 && key[0] == '"' && key[len - 1] == '"') {
+        ds_clear(tmp);
+        ds_put_buffer(tmp, key + 1, len - 2); /* drop leading/trailing " */
+        return ds_cstr(tmp);
+    }
+    return key; /* already unquoted */
+}
+
+/*
+ * Ingress table 25: Flows that forward ARP/ND requests only to the routers
+ * that own the addresses. Other ARP/ND packets are still flooded in the
+@ -15940,6 +15982,101 @@ fix_flow_table_size(struct lflow_table *lflow_table,
+    lflow_table_set_size(lflow_table, total);
+}
+ * For L2-only VIFs, flood traffic at the *egress* L2 lookup stage.
+ * This preserves the standard egress path (incl. VLAN push on localnet/TAP).
+ * If multicast snooping is enabled, skip eth.mcast so normal snooping rules
+ * control it; otherwise flood mcast too. */
+static void
+add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
+{
+    if (!p || !p->od || !p->nbsp || !port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    /* Flood everything EXCEPT multicast (keeps IGMP/MLD scoping). */
+    ds_put_format(&match, "inport == \"%s\" && !eth.mcast", vif);
+
+    ovn_lflow_add_with_hint(lflows, p->od,
+                            S_SWITCH_IN_L2_LKUP,
+                            120,
+                            ds_cstr(&match),
+                            "outport = \"" MC_FLOOD_L2 "\"; output;",
+                            &p->nbsp->header_, NULL);
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
+/* Minimal and scoped port-security bypass for L2-only VIFs.
+ * - Only affects this single VIF.
+ * - Keeps stage ordering intact (still runs later stages).
+ * - Does not touch infra ports or other VIFs. */
+static void
+add_minimal_portsec_bypass(struct ovn_port *p, struct hmap *lflows) 
+                           
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
+    if (!port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    /* Ingress: allow the packet to proceed past port-sec tables. */
+    ds_put_format(&match, "inport == \"%s\"", vif);
+    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_CHECK_PORT_SEC,
+                            100, ds_cstr(&match), "next;",
+                            &p->nbsp->header_, NULL);
+    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_APPLY_PORT_SEC,
+                            100, ds_cstr(&match), "next;",
+                            &p->nbsp->header_, NULL);
+
+    /* Egress: same idea but keyed on outport. */
+    ds_clear(&match);
+    ds_put_format(&match, "outport == \"%s\"", vif);
+    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_CHECK_PORT_SEC,
+                            100, ds_cstr(&match), "next;",
+                            &p->nbsp->header_, NULL);
+    ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_OUT_APPLY_PORT_SEC,
+                            100, ds_cstr(&match), "output;",
+                            &p->nbsp->header_, NULL);
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
+
+
 /*
  * Ingress table 25: Flows that forward ARP/ND requests only to the routers
  * that own the addresses. Other ARP/ND packets are still flooded in the
@@ -16065,7 +16200,29 @@ build_lswitch_and_lrouter_flows(
                                               &lsi.actions,
                                               lsi.lflows);
         }
+
+        /* Handle L2-only VIFs:
+         * - minimally bypass port security for that port only
+         * - add unknown-unicast fallback at OUT_L2_LKUP
+         *
+         * Both are low/specific priority so the standard pipeline keeps
+         * taking precedence when applicable. */
+        HMAP_FOR_EACH (op, key_node, lsi.ls_ports) {
+            if (!op || !op->od || !op->nbsp) {
+                continue;
+            }
+            if (!port_is_l2_only_port(op)) {
+                continue;
+            }
+
+            VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
+                      op->json_key);
+            add_minimal_portsec_bypass(op, lsi.lflows);
+            add_l2only_flood_all(op, lsi.lflows);
+        }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
+/* PF9 stop */
+
         stopwatch_start(LFLOWS_LBS_STOPWATCH_NAME, time_msec());
         HMAP_FOR_EACH (lb_dps, hmap_node, lb_dps_map) {
             build_lswitch_arp_nd_service_monitor(lb_dps, lsi.ls_ports,

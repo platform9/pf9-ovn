@@ -85,7 +85,6 @@ EXTRA_DIST = \
 	MAINTAINERS.rst \
 	README.rst \
 	NOTICE \
-	Dockerfile \
 	.cirrus.yml \
 	.ci/ci.sh \
 	.ci/dpdk-build.sh \

@@ -8194,6 +8194,19 @@ lport_key_unquoted(const char *key, struct ds *tmp)
     return key; /* already unquoted */
 }
 
+/* Toggle MAC spoof protection for L2-only VIFs via Neutron-set tag.
+ * Default: protection on (no bypass). */
+static bool
+l2only_mac_spoof_protect_enabled(const struct ovn_port *op)
+{
+    if (!op || !op->nbsp) {
+        return true;
+    }
+
+    return smap_get_bool(&op->nbsp->external_ids,
+                         "pf9_mac_spoof_protect", true);
+}
+
 /*
  * Ingress table 25: Flows that forward ARP/ND requests only to the routers
  * that own the addresses. Other ARP/ND packets are still flooded in the
@@ -16215,9 +16228,12 @@ build_lswitch_and_lrouter_flows(
                 continue;
             }
 
-            VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
-                      op->json_key);
-            add_minimal_portsec_bypass(op, lsi.lflows);
+            bool spoof_protect = l2only_mac_spoof_protect_enabled(op);
+            VLOG_INFO("L2-only VIF detected on %s; mac spoof protect=%s",
+                      op->json_key, spoof_protect ? "on" : "off");
+            if (!spoof_protect) {
+                add_minimal_portsec_bypass(op, lsi.lflows);
+            }
             add_l2only_flood_all(op, lsi.lflows);
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());

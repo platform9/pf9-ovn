@@ -6,14 +6,10 @@ ROOT="$(pwd)/pf9-ovn"
 
 
 PF9_OVN_BUILD_VERSION=24.03.2-pf9-$BUILD_NUMBER
+echo -ne $PF9_OVN_BUILD_VERSION > $ROOT/ovn-deb-version.txt
 
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/debian/changelog
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/configure.ac
-
-head -50 $ROOT/configure.ac
-head -20 $ROOT/debian/changelog
-
-exit 1;
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \

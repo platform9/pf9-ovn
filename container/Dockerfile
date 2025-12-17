@@ -21,33 +21,8 @@ RUN apt-get update \
 
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
   && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# The following files/directories get copied from `pf9-ovn-kubernetes/dist/images`:
-    # ovnkube.sh
-    # ovndb-raft-functions.sh
-    # ovn_k8s.conf
-    # iptables-scripts/
-
-# RUNmkdir -p /usr/libexec/cni/
-# NOT copying: ovnkube ovndbchecker ovnkube-identity ovnkube-observ 
+ 
 COPY  ovn-kube-util /usr/bin/
-# COPY ovn-k8s-cni-overlay /usr/libexec/cni/ovn-k8s-cni-overlay
-
-# ovnkube.sh is the entry point. This script examines environment
-# variables to direct operation and configure ovn
-# COPY ovnkube.sh /root/
-# COPY ovndb-raft-functions.sh /root/
-# # override the pkg's ovn_k8s.conf with this local copy
-# COPY ovn_k8s.conf /etc/openvswitch/ovn_k8s.conf
-
-
-# # iptables wrappers
-# COPY ./iptables-scripts/iptables /usr/sbin/
-# COPY ./iptables-scripts/iptables-save /usr/sbin/
-# COPY ./iptables-scripts/iptables-restore /usr/sbin/
-# COPY ./iptables-scripts/ip6tables /usr/sbin/
-# COPY ./iptables-scripts/ip6tables-save /usr/sbin/
-# COPY ./iptables-scripts/ip6tables-restore /usr/sbin/
 
 
 RUN install -d -m 0755 /var/lib/ovn /var/log/ovn /etc/ovn

@@ -2,6 +2,19 @@ set -x
 
 #source pf9-version/pf9-version.rc
 
+ROOT="$(pwd)/pf9-ovn"
+
+
+PF9_OVN_BUILD_VERSION=24.03.2-pf9-$BUILD_NUMBER
+
+sed -i '' "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/debian/changelog
+sed -i '' "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/configure.ac
+
+head -50 $ROOT/configure.ac
+head -20 $ROOT/debian/changelog
+
+exit 1;
+
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
@@ -14,18 +27,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 git config --global --add safe.directory '*'
 
-ROOT="$(pwd)/pf9-ovn"
 
-
-PF9_OVN_BUILD_VERSION=24.03.2-pf9-$BUILD_NUMBER
-
-sed -i '' "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/" $ROOT/debian/changelog
-sed -i '' "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/" $ROOT/configure.ac
-
-head -50 $ROOT/configure.ac
-head -20 $ROOT/debian/changelog
-
-exit 1;
 
 # In pf9-ovn/ovs
 ( cd "$ROOT/ovs" && ./boot.sh )

@@ -4,6 +4,8 @@ source pf9-version/pf9-version.rc
 
 ROOT="$(pwd)/pf9-ovn"
 
+make distclean
+
 UBUNTU_VERSION=$1
 
 

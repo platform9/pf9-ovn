@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy built packages from the build context
-COPY pkgs/*.deb /tmp/pkgs/
+COPY pkgs/u22/*.deb /tmp/pkgs/
 
 RUN apt-get update \
 && dpkg -i /tmp/pkgs/*.deb || true \

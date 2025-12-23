@@ -2,6 +2,7 @@ set -x
 
 source pf9-version/pf9-version.rc
 
+TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
 make distclean
@@ -56,10 +57,13 @@ export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
-ARTIFACT_DIR="$ROOT/pkgs/$UBUNTU_VERSION"
+ARTIFACT_DIR="$TEAMCITY_ROOT/pkgs/$UBUNTU_VERSION"
 mkdir -p $ARTIFACT_DIR
 mv -v "$ROOT"/*.deb $ARTIFACT_DIR
 mv -v ../*.deb $ARTIFACT_DIR
+
+git reset HEAD --hard
+git clean -x
 
 cd $ARTIFACT_DIR
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

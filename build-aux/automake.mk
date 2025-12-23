@@ -1,5 +1,4 @@
 EXTRA_DIST += \
-    build-aux/build-debs.sh \
 	build-aux/calculate-schema-cksum \
 	build-aux/cccl \
 	build-aux/cksum-schema-check \

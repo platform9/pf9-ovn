@@ -62,12 +62,14 @@ mkdir -p $ARTIFACT_DIR
 mv -v "$ROOT"/*.deb $ARTIFACT_DIR
 mv -v ../*.deb $ARTIFACT_DIR
 
+# clean up the build
+cd $ROOT
 git reset HEAD --hard
-git clean -x
+git clean -fdx
 
 cd $ROOT/ovs
 git reset HEAD --hard
-git clean -x
+git clean -fdx
 
 cd $ARTIFACT_DIR
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

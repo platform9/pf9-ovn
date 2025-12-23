@@ -2,6 +2,7 @@ set -x
 
 source pf9-version/pf9-version.rc
 
+TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
 make distclean
@@ -10,7 +11,7 @@ UBUNTU_VERSION=$1
 
 
 PF9_OVN_BUILD_VERSION=24.03.2-pf9-$PF9_VERSION-$BUILD_NUMBER
-printf '%s' "$PF9_OVN_BUILD_VERSION" > $ROOT/ovn-deb-version.txt
+printf '%s' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/debian/changelog
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" $ROOT/configure.ac
@@ -56,10 +57,19 @@ export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
-ARTIFACT_DIR="$ROOT/pkgs/$UBUNTU_VERSION"
+ARTIFACT_DIR="$TEAMCITY_ROOT/pkgs/$UBUNTU_VERSION"
 mkdir -p $ARTIFACT_DIR
 mv -v "$ROOT"/*.deb $ARTIFACT_DIR
 mv -v ../*.deb $ARTIFACT_DIR
+
+# clean up the build
+cd $ROOT
+git reset HEAD --hard
+git clean -fdx
+
+cd $ROOT/ovs
+git reset HEAD --hard
+git clean -fdx
 
 cd $ARTIFACT_DIR
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

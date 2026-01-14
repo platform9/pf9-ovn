@@ -20,7 +20,12 @@ PF9_OVS_BUILD_VERSION=1:3.3.1-pf9-$PF9_VERSION-$BUILD_NUMBER
 printf '%s' "$PF9_OVS_BUILD_VERSION" >> $ROOT/ovn-deb-version.txt
 
 sed -i "s/3.3.1-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/debian/changelog
-sed -i "s/3.3.1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
+
+# Python setuptools (used in OVS build) requires PEP 440 compliant version.
+# We sanitize the version by removing epoch and replacing hyphens with dots or +
+# 1:3.3.1-pf9... -> 3.3.1+pf9...
+PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed 's/^1://; s/-/./g; s/3.3.1./3.3.1+/')
+sed -i "s/3.3.1/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \

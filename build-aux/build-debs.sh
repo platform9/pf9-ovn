@@ -18,6 +18,7 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" $R
 
 PF9_OVS_BUILD_VERSION=1:3.3.1-pf9-$PF9_VERSION-$BUILD_NUMBER
 printf '%s' "$PF9_OVS_BUILD_VERSION" >> $ROOT/ovn-deb-version.txt
+cat ovn-deb-version.txt
 
 sed -i "s/3.3.1-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/debian/changelog
 

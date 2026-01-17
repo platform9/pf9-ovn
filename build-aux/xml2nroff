@@ -97,7 +97,7 @@ def manpage_to_nroff(xml_file, subst, include_path, version=None):
 ''' % (nroff.text_to_nroff(program),
        nroff.text_to_nroff(section),
        nroff.text_to_nroff(title),
-       nroff.text_to_nroff(version))
+       nroff.text_to_nroff(version, escape_dot=False))
 
     s += nroff.block_xml_to_nroff(doc.childNodes) + "\n"
 

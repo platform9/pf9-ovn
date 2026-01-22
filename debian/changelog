@@ -1,8 +1,7 @@
 ovn (__PF9_OVN_BUILD_VERSION__) unstable; urgency=medium
-
-* Platform9 Systems
-  * ovn-northd: added changes to support l2 only ports
-  * container: added support to build ovn container using custom changes
+   [ Platform9 Systems ]
+   * ovn-northd: added changes to support l2 only ports
+   * container: added support to build ovn container using custom changes
 
  -- Platform9 Systems <info@platform9.com>  Tue, 16 Dec 2025 22:00:00 -0800
 

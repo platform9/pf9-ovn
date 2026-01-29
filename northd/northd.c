@@ -8242,6 +8242,68 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
     ds_destroy(&match);
 }
 
+/* Allow L2-only VIF traffic if and only if eth.src matches the port MAC.
+ * This preserves MAC anti-spoofing while relaxing IP/ARP restrictions.
+ */
+static void
+add_l2only_mac_only_portsec_allow(struct ovn_port *p, struct hmap *lflows)
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
+    if (!port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    /* Use logical switch port addresses (or port security if present) as the
+     * allowed MAC set for this VIF. */
+    const struct lport_addresses *addrs = p->lsp_addrs;
+    size_t n_addrs = p->n_lsp_addrs;
+    if (!n_addrs && p->n_ps_addrs) {
+        addrs = p->ps_addrs;
+        n_addrs = p->n_ps_addrs;
+    }
+
+    for (size_t i = 0; i < n_addrs; i++) {
+        const char *mac = addrs[i].ea_s;
+
+        /* Ingress: allow frames with correct source MAC */
+        ds_clear(&match);
+        ds_put_format(&match,
+            "inport == \"%s\" && eth.src == %s",
+            vif, mac);
+
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,                    /* higher than drop rules */
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL);
+
+        /* ARP: ensure arp.sha matches MAC */
+        ds_clear(&match);
+        ds_put_format(&match,
+            "inport == \"%s\" && eth.type == 0x0806 && arp.sha == %s",
+            vif, mac);
+
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL);
+    }
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
 /* Minimal and scoped port-security bypass for L2-only VIFs.
  * - Only affects this single VIF.
  * - Keeps stage ordering intact (still runs later stages).
@@ -16233,6 +16295,8 @@ build_lswitch_and_lrouter_flows(
                       op->json_key, spoof_protect ? "on" : "off");
             if (!spoof_protect) {
                 add_minimal_portsec_bypass(op, lsi.lflows);
+            } else {
+                add_l2only_mac_only_portsec_allow(op, lsi.lflows);
             }
             add_l2only_flood_all(op, lsi.lflows);
         }

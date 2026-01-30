@@ -9,7 +9,7 @@ ROOT="$(pwd)/pf9-ovn"
 make distclean
 
 UBUNTU_VERSION=$1
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+CURRENT_BRANCH="%teamcity.build.branch%"
 
 # 1. Determine versions and switch branches based on naming convention
 if [ "$UBUNTU_VERSION" = "u24" ]; then

@@ -9,23 +9,53 @@ make distclean
 
 UBUNTU_VERSION=$1
 
+# 1. Determine versions based on the input argument
+if [ "$UBUNTU_VERSION" = "u24" ]; then
+    # Ubuntu 24.04 (Noble)
+    OVS_BASE="3.3.6"
+    OVN_BASE="24.03.6"
+elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
+    # Ubuntu 22.04 (Jammy) - Defaulting to u22 if empty, strictly safer to error out though
+    OVS_BASE="3.3.1"
+    OVN_BASE="24.03.2"
+    # skipping u22 build for now because testing u24
+    exit 0
+else
+    echo "Error: Invalid Ubuntu version '$UBUNTU_VERSION'. Expected 'u22' or 'u24'."
+    exit 1
+fi
 
-PF9_OVN_BUILD_VERSION=1:24.03.2-pf9-$PF9_VERSION-$BUILD_NUMBER
-printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
+# --- OVN CONFIGURATION ---
+PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
+if [ "$UBUNTU_VERSION" = "u22" ]; then
+  printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
+fi
 
+# Update OVN files
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/debian/changelog
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/configure.ac
 
-PF9_OVS_BUILD_VERSION=1:3.3.1-pf9-$PF9_VERSION-$BUILD_NUMBER
-printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+# --- OVS CONFIGURATION ---
 
-sed -i "s/3.3.1-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/debian/changelog
+PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
+if [ "$UBUNTU_VERSION" = "u22" ]; then
+  printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+fi
+# Update OVS Changelog
+# NOTE: This uses ${OVS_BASE}-1 as the search pattern (e.g. searching for 3.3.1-1 or 3.3.4-1)
+sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/debian/changelog
 
 # Python setuptools (used in OVS build) requires PEP 440 compliant version.
 # We sanitize the version by removing epoch and replacing hyphens with dots or +
 # 1:3.3.1-pf9... -> 3.3.1+pf9...
-PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed 's/^1://; s/-/./g; s/3.3.1./3.3.1+/')
-sed -i "s/3.3.1/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
+# 1. Remove '1:' (epoch)
+# 2. Replace all '-' with '.'
+# 3. Replace the first dot after the base version (e.g. "3.3.6.") with a "+" ("3.3.6+")
+#    to strictly adhere to local version identifier rules.
+PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+
+# Replace the base version in configure.ac with the full sanitized Python version
+sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
 
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \

@@ -9,7 +9,7 @@ ROOT="$(pwd)/pf9-ovn"
 make distclean
 
 UBUNTU_VERSION=$1
-CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+CURRENT_BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
 
 # 1. Determine versions and switch branches based on naming convention
 if [ "$UBUNTU_VERSION" = "u24" ]; then
@@ -22,11 +22,11 @@ if [ "$UBUNTU_VERSION" = "u24" ]; then
         echo "Current branch '$CURRENT_BRANCH' does not contain 'u24'."
         
         # Attempt to checkout the specific <branch>-u24 variant
-        if git checkout "${CURRENT_BRANCH}-u24"; then
+        if git -C "$ROOT" checkout "${CURRENT_BRANCH}-u24"; then
             echo "Successfully switched to specific branch '${CURRENT_BRANCH}-u24'."
         else
             echo "Specific branch '${CURRENT_BRANCH}-u24' not found. Defaulting to 'main-u24'."
-            git checkout "main-u24"
+            git -C "$ROOT" checkout "main-u24"
         fi
     else
         echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
@@ -40,7 +40,7 @@ elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
     # Logic: If current branch name DOES contain "u24", switch to 'main' (for u22 build)
     if echo "$CURRENT_BRANCH" | grep -q "u24"; then
         echo "Current branch '$CURRENT_BRANCH' contains 'u24' but targeting u22. Switching to 'main'."
-        git checkout "main"
+        git -C "$ROOT" checkout "main"
     else
         echo "Current branch '$CURRENT_BRANCH' is appropriate for u22. Keeping it."
     fi
@@ -52,7 +52,7 @@ fi
 
 # 2. Initialize and update submodules recursively
 # Performed after branch switching to ensure correct submodules are pulled
-git submodule update --init --recursive
+git -C "$ROOT" submodule update --init --recursive
 
 # --- OVN CONFIGURATION ---
 PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
@@ -141,7 +141,7 @@ cd $ROOT/ovs
 git reset HEAD --hard
 git clean -fdx
 
-git checkout "${CURRENT_BRANCH}"
+git -C "$ROOT" checkout "${CURRENT_BRANCH}
 
 cd $ARTIFACT_DIR
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

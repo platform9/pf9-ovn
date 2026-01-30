@@ -9,7 +9,7 @@ ROOT="$(pwd)/pf9-ovn"
 make distclean
 
 UBUNTU_VERSION=$1
-CURRENT_BRANCH="%teamcity.build.branch%"
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
 # 1. Determine versions and switch branches based on naming convention
 if [ "$UBUNTU_VERSION" = "u24" ]; then
@@ -140,6 +140,8 @@ git clean -fdx
 cd $ROOT/ovs
 git reset HEAD --hard
 git clean -fdx
+
+git checkout "${CURRENT_BRANCH}"
 
 cd $ARTIFACT_DIR
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

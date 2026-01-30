@@ -5757,7 +5757,8 @@ build_lswitch_port_sec_op(struct ovn_port *op, struct lflow_table *lflows,
 static void
 build_lswitch_learn_fdb_op(
     struct ovn_port *op, struct lflow_table *lflows,
-    struct ds *actions, struct ds *match)
+    struct ds *actions, struct ds *match,
+    const char *pf9_mac_learning_skip)
 {
     ovs_assert(op->nbsp);
 
@@ -5778,6 +5779,10 @@ build_lswitch_learn_fdb_op(
                                           op->lflow_ref);
 
         ds_put_cstr(match, " && "REGBIT_LKUP_FDB" == 0");
+        if (pf9_mac_learning_skip) {
+            ds_put_format(match, " && eth.src != %s",
+                          pf9_mac_learning_skip);
+        }
         ds_clear(actions);
         ds_put_cstr(actions, "put_fdb(inport, eth.src); next;");
         ovn_lflow_add_with_lport_and_hint(lflows, op->od, S_SWITCH_IN_PUT_FDB,
@@ -8224,6 +8229,68 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
                             ds_cstr(&match),
                             "outport = \"" MC_FLOOD_L2 "\"; output;",
                             &p->nbsp->header_, NULL);
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
+
+/* Allow L2-only VIF traffic if and only if eth.src matches the port MAC.
+ * This preserves MAC anti-spoofing while relaxing IP/ARP restrictions.
+ */
+static void
+add_l2only_mac_only_portsec_allow(struct ovn_port *p, struct hmap *lflows)
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
+    if (!port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    /* Use logical switch port addresses (or port security if present) as the
+     * allowed MAC set for this VIF. */
+    const struct lport_addresses *addrs = p->lsp_addrs;
+    size_t n_addrs = p->n_lsp_addrs;
+    if (!n_addrs && p->n_ps_addrs) {
+        addrs = p->ps_addrs;
+        n_addrs = p->n_ps_addrs;
+    }
+
+    for (size_t i = 0; i < n_addrs; i++) {
+        const char *mac = addrs[i].ea_s;
+
+        /* Ingress: allow frames with correct source MAC. */
+        ds_clear(&match);
+        ds_put_format(&match,
+                      "inport == \"%s\" && eth.src == %s",
+                      vif, mac);
+
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,                    /* higher than drop rules */
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL);
+
+        /* ARP: ensure arp.sha matches MAC. */
+        ds_clear(&match);
+        ds_put_format(&match,
+                      "inport == \"%s\" && eth.type == 0x0806 && arp.sha == %s",
+                      vif, mac);
+
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL);
+    }
 
     ds_destroy(&unq);
     ds_destroy(&match);
@@ -15727,6 +15794,7 @@ struct lswitch_flow_build_info {
     struct ds actions;
     size_t thread_lflow_counter;
     const char *svc_monitor_mac;
+    const char *pf9_mac_learning_skip;
 };
 
 /* Helper function to combine all lflow generation which is iterated by
@@ -15809,6 +15877,7 @@ build_lswitch_and_lrouter_iterate_by_lsp(struct ovn_port *op,
                                          const struct hmap *ls_ports,
                                          const struct hmap *lr_ports,
                                          const struct shash *meter_groups,
+                                         const char *pf9_mac_learning_skip,
                                          struct ds *match,
                                          struct ds *actions,
                                          struct lflow_table *lflows)
@@ -15817,7 +15886,8 @@ build_lswitch_and_lrouter_iterate_by_lsp(struct ovn_port *op,
 
     /* Build Logical Switch Flows. */
     build_lswitch_port_sec_op(op, lflows, actions, match);
-    build_lswitch_learn_fdb_op(op, lflows, actions, match);
+    build_lswitch_learn_fdb_op(op, lflows, actions, match,
+                               pf9_mac_learning_skip);
     build_lswitch_arp_nd_responder_skip_local(op, lflows, match);
     build_lswitch_arp_nd_responder_known_ips(op, lflows, ls_ports,
                                              meter_groups, actions, match);
@@ -15929,6 +15999,7 @@ build_lflows_thread(void *arg)
                     build_lswitch_and_lrouter_iterate_by_lsp(op, lsi->ls_ports,
                                                              lsi->lr_ports,
                                                              lsi->meter_groups,
+                                                             lsi->pf9_mac_learning_skip,
                                                              &lsi->match,
                                                              &lsi->actions,
                                                              lsi->lflows);
@@ -16091,7 +16162,9 @@ build_lswitch_and_lrouter_flows(
     const struct hmap *svc_monitor_map,
     const struct hmap *bfd_connections,
     const struct chassis_features *features,
-    const char *svc_monitor_mac)
+    const char *svc_monitor_mac,
+    bool pf9_allow_mac_forged_transmits,
+    const char *pf9_mac_learning_skip)
 {
 
     char *svc_check_match = xasprintf("eth.dst == %s", svc_monitor_mac);
@@ -16125,6 +16198,7 @@ build_lswitch_and_lrouter_flows(
             lsiv[index].svc_check_match = svc_check_match;
             lsiv[index].thread_lflow_counter = 0;
             lsiv[index].svc_monitor_mac = svc_monitor_mac;
+            lsiv[index].pf9_mac_learning_skip = pf9_mac_learning_skip;
             ds_init(&lsiv[index].match);
             ds_init(&lsiv[index].actions);
 
@@ -16165,6 +16239,7 @@ build_lswitch_and_lrouter_flows(
             .features = features,
             .svc_check_match = svc_check_match,
             .svc_monitor_mac = svc_monitor_mac,
+            .pf9_mac_learning_skip = pf9_mac_learning_skip,
             .match = DS_EMPTY_INITIALIZER,
             .actions = DS_EMPTY_INITIALIZER,
         };
@@ -16185,6 +16260,7 @@ build_lswitch_and_lrouter_flows(
             build_lswitch_and_lrouter_iterate_by_lsp(op, lsi.ls_ports,
                                                      lsi.lr_ports,
                                                      lsi.meter_groups,
+                                                     lsi.pf9_mac_learning_skip,
                                                      &lsi.match,
                                                      &lsi.actions,
                                                      lsi.lflows);
@@ -16217,6 +16293,9 @@ build_lswitch_and_lrouter_flows(
 
             VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
                       op->json_key);
+            if (pf9_allow_mac_forged_transmits) {
+                add_l2only_mac_only_portsec_allow(op, lsi.lflows);
+            }
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
         }
@@ -16348,7 +16427,9 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                                     input_data->svc_monitor_map,
                                     input_data->bfd_connections,
                                     input_data->features,
-                                    input_data->svc_monitor_mac);
+                                    input_data->svc_monitor_mac,
+                                    input_data->pf9_allow_mac_forged_transmits,
+                                    input_data->pf9_mac_learning_skip);
 
     if (parallelization_state == STATE_INIT_HASH_SIZES) {
         parallelization_state = STATE_USE_PARALLELIZATION;
@@ -16486,6 +16567,7 @@ lflow_handle_northd_port_changes(struct ovsdb_idl_txn *ovnsb_txn,
         build_lswitch_and_lrouter_iterate_by_lsp(op, lflow_input->ls_ports,
                                                  lflow_input->lr_ports,
                                                  lflow_input->meter_groups,
+                                                 lflow_input->pf9_mac_learning_skip,
                                                  &match, &actions,
                                                  lflows);
         /* Sync the new flows to SB. */
@@ -16542,6 +16624,7 @@ lflow_handle_northd_port_changes(struct ovsdb_idl_txn *ovnsb_txn,
         build_lswitch_and_lrouter_iterate_by_lsp(op, lflow_input->ls_ports,
                                                  lflow_input->lr_ports,
                                                  lflow_input->meter_groups,
+                                                 lflow_input->pf9_mac_learning_skip,
                                                  &match, &actions, lflows);
 
         /* Sync the newly added flows to SB. */

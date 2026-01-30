@@ -100,6 +100,19 @@ en_global_config_run(struct engine_node *node , void *data)
         }
     }
 
+    const char *skip_mac = smap_get(&nb->external_ids,
+                                    "pf9-mac-learning-skip");
+    config_data->pf9_mac_learning_skip_set = false;
+    if (skip_mac) {
+        struct eth_addr ea;
+        if (eth_addr_from_string(skip_mac, &ea)) {
+            snprintf(config_data->pf9_mac_learning_skip,
+                     sizeof config_data->pf9_mac_learning_skip,
+                     ETH_ADDR_FMT, ETH_ADDR_ARGS(ea));
+            config_data->pf9_mac_learning_skip_set = true;
+        }
+    }
+
     struct smap *options = &config_data->nb_options;
     smap_destroy(options);
     smap_clone(options, &nb->options);
@@ -197,9 +210,10 @@ global_config_nb_global_handler(struct engine_node *node, void *data)
         return false;
     }
 
-    /* We are only interested in ipsec and options column. */
+    /* We are only interested in ipsec, options, and external_ids columns. */
     if (!nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_IPSEC)
-        && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_OPTIONS)) {
+        && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_OPTIONS)
+        && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_EXTERNAL_IDS)) {
         return true;
     }
 

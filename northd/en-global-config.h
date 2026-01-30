@@ -43,6 +43,10 @@ struct ed_type_global_config {
     char svc_monitor_mac[ETH_ADDR_STRLEN + 1];
     struct eth_addr svc_monitor_mac_ea;
 
+    /* MAC to skip from FDB learning, sourced from NB_Global.external_ids. */
+    bool pf9_mac_learning_skip_set;
+    char pf9_mac_learning_skip[ETH_ADDR_STRLEN + 1];
+
     struct chassis_features features;
 
     bool ovn_internal_version_changed;

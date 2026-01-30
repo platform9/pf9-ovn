@@ -86,6 +86,13 @@ lflow_get_input_data(struct engine_node *node,
     lflow_input->ovn_internal_version_changed =
         global_config->ovn_internal_version_changed;
     lflow_input->svc_monitor_mac = global_config->svc_monitor_mac;
+    lflow_input->pf9_allow_mac_forged_transmits =
+        smap_get_bool(&global_config->nb_options,
+                      "pf9-allow-mac-forged-transmits", false);
+    lflow_input->pf9_mac_learning_skip =
+        global_config->pf9_mac_learning_skip_set
+        ? global_config->pf9_mac_learning_skip
+        : NULL;
 }
 
 void en_lflow_run(struct engine_node *node, void *data)

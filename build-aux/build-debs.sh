@@ -5,6 +5,19 @@ source pf9-version/pf9-version.rc
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+  fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
+  debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
+  graphviz iproute2 libcap-ng-dev libnuma-dev libpcap-dev libssl-dev libtool \
+  libunbound-dev openssl pkg-config procps python3-all-dev python3-setuptools \
+  python3-sortedcontainers python3-sphinx libjson-c-dev libevent-dev \
+  libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
+  libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
+
+git config --global --add safe.directory '*'
+
+
 # Cleanup: Remove previous build artifacts and the dist directory
 make distclean
 
@@ -85,18 +98,6 @@ PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; 
 
 # Replace the base version in configure.ac with the full sanitized Python version
 sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
-
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
-  debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
-  graphviz iproute2 libcap-ng-dev libnuma-dev libpcap-dev libssl-dev libtool \
-  libunbound-dev openssl pkg-config procps python3-all-dev python3-setuptools \
-  python3-sortedcontainers python3-sphinx libjson-c-dev libevent-dev \
-  libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
-  libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
-
-git config --global --add safe.directory '*'
 
 
 

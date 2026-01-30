@@ -54,6 +54,7 @@ en_global_config_init(struct engine_node *node OVS_UNUSED,
     struct ed_type_global_config *data = xzalloc(sizeof *data);
     smap_init(&data->nb_options);
     smap_init(&data->sb_options);
+    sset_init(&data->pf9_mac_learning_skip);
     northd_enable_all_features(data);
     return data;
 }
@@ -100,17 +101,23 @@ en_global_config_run(struct engine_node *node , void *data)
         }
     }
 
-    const char *skip_mac = smap_get(&nb->external_ids,
-                                    "pf9-mac-learning-skip");
-    config_data->pf9_mac_learning_skip_set = false;
-    if (skip_mac) {
-        struct eth_addr ea;
-        if (eth_addr_from_string(skip_mac, &ea)) {
-            snprintf(config_data->pf9_mac_learning_skip,
-                     sizeof config_data->pf9_mac_learning_skip,
-                     ETH_ADDR_FMT, ETH_ADDR_ARGS(ea));
-            config_data->pf9_mac_learning_skip_set = true;
+    const char *skip_macs = smap_get(&nb->external_ids,
+                                     "pf9-mac-learning-skip");
+    sset_clear(&config_data->pf9_mac_learning_skip);
+    if (skip_macs && skip_macs[0]) {
+        struct sset raw = SSET_INITIALIZER(&raw);
+        sset_from_delimited_string(&raw, skip_macs, ", \t\n");
+        const char *mac;
+        SSET_FOR_EACH (mac, &raw) {
+            struct eth_addr ea;
+            if (eth_addr_from_string(mac, &ea)) {
+                char mac_str[ETH_ADDR_STRLEN + 1];
+                snprintf(mac_str, sizeof mac_str, ETH_ADDR_FMT,
+                         ETH_ADDR_ARGS(ea));
+                sset_add(&config_data->pf9_mac_learning_skip, mac_str);
+            }
         }
+        sset_destroy(&raw);
     }
 
     struct smap *options = &config_data->nb_options;
@@ -178,6 +185,7 @@ void en_global_config_cleanup(void *data OVS_UNUSED)
     struct ed_type_global_config *config_data = data;
     smap_destroy(&config_data->nb_options);
     smap_destroy(&config_data->sb_options);
+    sset_destroy(&config_data->pf9_mac_learning_skip);
     destroy_debug_config();
 }
 

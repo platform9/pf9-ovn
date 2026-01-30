@@ -90,9 +90,9 @@ lflow_get_input_data(struct engine_node *node,
         smap_get_bool(&global_config->nb_options,
                       "pf9-allow-mac-forged-transmits", false);
     lflow_input->pf9_mac_learning_skip =
-        global_config->pf9_mac_learning_skip_set
-        ? global_config->pf9_mac_learning_skip
-        : NULL;
+        sset_is_empty(&global_config->pf9_mac_learning_skip)
+        ? NULL
+        : &global_config->pf9_mac_learning_skip;
 }
 
 void en_lflow_run(struct engine_node *node, void *data)

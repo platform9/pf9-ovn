@@ -5758,7 +5758,7 @@ static void
 build_lswitch_learn_fdb_op(
     struct ovn_port *op, struct lflow_table *lflows,
     struct ds *actions, struct ds *match,
-    const char *pf9_mac_learning_skip)
+    const struct sset *pf9_mac_learning_skip)
 {
     ovs_assert(op->nbsp);
 
@@ -5779,9 +5779,12 @@ build_lswitch_learn_fdb_op(
                                           op->lflow_ref);
 
         ds_put_cstr(match, " && "REGBIT_LKUP_FDB" == 0");
-        if (pf9_mac_learning_skip) {
-            ds_put_format(match, " && eth.src != %s",
-                          pf9_mac_learning_skip);
+        if (pf9_mac_learning_skip &&
+            !sset_is_empty(pf9_mac_learning_skip)) {
+            const char *skip_mac;
+            SSET_FOR_EACH (skip_mac, pf9_mac_learning_skip) {
+                ds_put_format(match, " && eth.src != %s", skip_mac);
+            }
         }
         ds_clear(actions);
         ds_put_cstr(actions, "put_fdb(inport, eth.src); next;");
@@ -15794,7 +15797,7 @@ struct lswitch_flow_build_info {
     struct ds actions;
     size_t thread_lflow_counter;
     const char *svc_monitor_mac;
-    const char *pf9_mac_learning_skip;
+    const struct sset *pf9_mac_learning_skip;
 };
 
 /* Helper function to combine all lflow generation which is iterated by
@@ -15877,7 +15880,7 @@ build_lswitch_and_lrouter_iterate_by_lsp(struct ovn_port *op,
                                          const struct hmap *ls_ports,
                                          const struct hmap *lr_ports,
                                          const struct shash *meter_groups,
-                                         const char *pf9_mac_learning_skip,
+                                         const struct sset *pf9_mac_learning_skip,
                                          struct ds *match,
                                          struct ds *actions,
                                          struct lflow_table *lflows)
@@ -16164,7 +16167,7 @@ build_lswitch_and_lrouter_flows(
     const struct chassis_features *features,
     const char *svc_monitor_mac,
     bool pf9_allow_mac_forged_transmits,
-    const char *pf9_mac_learning_skip)
+    const struct sset *pf9_mac_learning_skip)
 {
 
     char *svc_check_match = xasprintf("eth.dst == %s", svc_monitor_mac);

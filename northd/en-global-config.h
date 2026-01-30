@@ -6,6 +6,7 @@
 /* OVS includes. */
 #include "lib/packets.h"
 #include "lib/smap.h"
+#include "lib/sset.h"
 
 /* OVN includes. */
 #include "lib/inc-proc-eng.h"
@@ -43,9 +44,8 @@ struct ed_type_global_config {
     char svc_monitor_mac[ETH_ADDR_STRLEN + 1];
     struct eth_addr svc_monitor_mac_ea;
 
-    /* MAC to skip from FDB learning, sourced from NB_Global.external_ids. */
-    bool pf9_mac_learning_skip_set;
-    char pf9_mac_learning_skip[ETH_ADDR_STRLEN + 1];
+    /* MACs to skip from FDB learning, sourced from NB_Global.external_ids. */
+    struct sset pf9_mac_learning_skip;
 
     struct chassis_features features;
 

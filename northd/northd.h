@@ -18,6 +18,7 @@
 
 #include "lib/ovn-sb-idl.h"
 #include "lib/ovn-util.h"
+#include "lib/sset.h"
 #include "lib/ovs-atomic.h"
 #include "lib/sset.h"
 #include "northd/en-port-group.h"
@@ -191,7 +192,7 @@ struct lflow_input {
     bool ovn_internal_version_changed;
     const char *svc_monitor_mac;
     bool pf9_allow_mac_forged_transmits;
-    const char *pf9_mac_learning_skip;
+    const struct sset *pf9_mac_learning_skip;
 };
 
 extern int parallelization_state;

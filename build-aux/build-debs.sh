@@ -1,10 +1,12 @@
 set -x
+set -e # Recommended: Fail immediately if any command fails
 
 source pf9-version/pf9-version.rc
 
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
+# Install dependencies
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
   fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
@@ -17,11 +19,16 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 git config --global --add safe.directory '*'
 
-
 # Cleanup: Remove previous build artifacts and the dist directory
-make distclean
+# We run make distclean in ROOT if Makefile exists, otherwise just clean dist
+if [ -f "$ROOT/Makefile" ]; then
+    make -C "$ROOT" distclean
+fi
+rm -rf "$ROOT/dist"
 
 UBUNTU_VERSION=$1
+
+# Capture current branch from the OVN repo specifically
 CURRENT_BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
 
 # 1. Determine versions and switch branches based on naming convention
@@ -74,75 +81,78 @@ if [ "$UBUNTU_VERSION" = "u22" ]; then
 fi
 
 # Update OVN files
-sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/debian/changelog
-sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/configure.ac
+sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/debian/changelog"
+sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/configure.ac"
 
 # --- OVS CONFIGURATION ---
-
 PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
 if [ "$UBUNTU_VERSION" = "u22" ]; then
   printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 fi
-# Update OVS Changelog
-# NOTE: This uses ${OVS_BASE}-1 as the search pattern (e.g. searching for 3.3.1-1 or 3.3.4-1)
-sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" $ROOT/ovs/debian/changelog
 
-# Python setuptools (used in OVS build) requires PEP 440 compliant version.
-# We sanitize the version by removing epoch and replacing hyphens with dots or +
-# 1:3.3.1-pf9... -> 3.3.1+pf9...
-# 1. Remove '1:' (epoch)
-# 2. Replace all '-' with '.'
-# 3. Replace the first dot after the base version (e.g. "3.3.6.") with a "+" ("3.3.6+")
-#    to strictly adhere to local version identifier rules.
+# Update OVS Changelog
+sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/ovs/debian/changelog"
+
+# Python setuptools sanitization (Pep 440)
 PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
 
-# Replace the base version in configure.ac with the full sanitized Python version
-sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" $ROOT/ovs/configure.ac
+# Replace the base version in configure.ac
+sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" "$ROOT/ovs/configure.ac"
 
 
-
-# In pf9-ovn/ovs
+# --- BUILD OVS ---
+# Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
+# Since we build in $ROOT/ovs, debs land in $ROOT.
 ( cd "$ROOT/ovs" && ./boot.sh )
 ( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
 ( cd "$ROOT/ovs" && make debian && make debian-deb)
 
-cd $ROOT
+# Install OVS dependencies required for OVN build
+cd "$ROOT"
 dpkg -i "$ROOT"/openvswitch-*.deb "$ROOT"/python3-openvswitch_*.deb \
        "$ROOT"/openvswitch-common_*.deb "$ROOT"/openvswitch-switch_*.deb \
        "$ROOT"/openvswitch-ipsec_*.deb "$ROOT"/openvswitch-vtep_*.deb \
        "$ROOT"/openvswitch-testcontroller_*.deb "$ROOT"/openvswitch-pki_*.deb \
        "$ROOT"/openvswitch-doc_*.deb "$ROOT"/openvswitch-source_*.deb || true
 
-cd $ROOT
+# --- BUILD OVN ---
+cd "$ROOT"
 ./boot.sh || true
-# If you built OVS with dpkg-buildpackage, its configured build dir is ovs/_debian
+
 OVSDIR=$ROOT/ovs
 OVSBUILDDIR="$OVSDIR/_debian"
 
-# sanity check that it's a configured tree
+# Sanity check
 test -f "$OVSBUILDDIR/config.status" || { echo "OVS not configured at $OVSBUILDDIR"; exit 1; }
 
-# export so make sees them
 export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 
-
+# Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
+# --- ARTIFACT COLLECTION ---
 ARTIFACT_DIR="$TEAMCITY_ROOT/pkgs/$UBUNTU_VERSION"
-mkdir -p $ARTIFACT_DIR
-mv -v "$ROOT"/*.deb $ARTIFACT_DIR
-mv -v ../*.deb $ARTIFACT_DIR
+mkdir -p "$ARTIFACT_DIR"
 
-# clean up the build
-cd $ROOT
+# Move OVS debs (from ROOT)
+mv -v "$ROOT"/*.deb "$ARTIFACT_DIR"
+
+# Move OVN debs (from ROOT/../)
+# Since we are in ROOT, we use ../
+mv -v ../*.deb "$ARTIFACT_DIR"
+
+
+# --- CLEANUP ---
+cd "$ROOT"
 git reset HEAD --hard
 git clean -fdx
 
-cd $ROOT/ovs
+cd "$ROOT/ovs"
 git reset HEAD --hard
 git clean -fdx
 
-git -C "$ROOT" checkout "${CURRENT_BRANCH}
+# Restore original branch to keep CI agent clean
+git -C "$ROOT" checkout "${CURRENT_BRANCH}"
 
-cd $ARTIFACT_DIR
+cd "$ARTIFACT_DIR"
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

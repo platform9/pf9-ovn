@@ -104,7 +104,6 @@ EXTRA_DIST = \
 	boot.sh \
 	container/Dockerfile \
 	container/Makefile \
-	build-aux/calculate-pipeline-cksum \
 	$(MAN_FRAGMENTS) \
 	$(MAN_ROOTS) \
 	Vagrantfile \

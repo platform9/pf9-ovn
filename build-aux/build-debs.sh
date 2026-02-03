@@ -8,7 +8,7 @@ ROOT="$(pwd)/pf9-ovn"
 
 # Install dependencies
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
   debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
   graphviz iproute2 libcap-ng-dev libnuma-dev libpcap-dev libssl-dev libtool \
@@ -26,6 +26,8 @@ if [ -f "$ROOT/Makefile" ]; then
 fi
 rm -rf "$ROOT/dist"
 
+# ... [Previous setup and make distclean] ...
+
 UBUNTU_VERSION=$1
 CURRENT_BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
 
@@ -34,16 +36,19 @@ if [ "$UBUNTU_VERSION" = "u24" ]; then
     OVS_BASE="3.3.6"
     OVN_BASE="24.03.6"
 
-    # Case 1: Already on a u24 branch
+    # Case 1: Already on a u24 branch - No Switch/Fetch needed
     if echo "$CURRENT_BRANCH" | grep -q "u24"; then
         echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
     
     # Case 2: On a u22 branch, try to swap 'u22' for 'u24'
     elif echo "$CURRENT_BRANCH" | grep -q "u22"; then
-        # String substitution: replace 'u22' with 'u24'
         TARGET_BRANCH="${CURRENT_BRANCH/u22/u24}"
-        echo "Current branch '$CURRENT_BRANCH' contains 'u22'. Attempting switch to '$TARGET_BRANCH'."
+        echo "Current branch '$CURRENT_BRANCH' contains 'u22'. Fetching..."
         
+        # Fetch before switching
+        git -C "$ROOT" fetch
+
+        echo "Attempting switch to '$TARGET_BRANCH'..."
         if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
             echo "Successfully switched to specific branch '$TARGET_BRANCH'."
         else
@@ -53,7 +58,8 @@ if [ "$UBUNTU_VERSION" = "u24" ]; then
     
     # Case 3: Generic branch (no u22/u24 in name) -> Default to main-u24
     else
-        echo "Current branch '$CURRENT_BRANCH' does not match u24 patterns. Defaulting to 'main-u24'."
+        echo "Current branch '$CURRENT_BRANCH' does not match u24 patterns. Fetching and defaulting to 'main-u24'."
+        git -C "$ROOT" fetch
         git -C "$ROOT" checkout "main-u24"
     fi
 
@@ -64,10 +70,13 @@ elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
 
     # Case 1: On a u24 branch, try to swap 'u24' for 'u22'
     if echo "$CURRENT_BRANCH" | grep -q "u24"; then
-        # String substitution: replace 'u24' with 'u22'
         TARGET_BRANCH="${CURRENT_BRANCH/u24/u22}"
-        echo "Current branch '$CURRENT_BRANCH' contains 'u24'. Attempting switch to '$TARGET_BRANCH'."
+        echo "Current branch '$CURRENT_BRANCH' contains 'u24'. Fetching..."
 
+        # Fetch before switching
+        git -C "$ROOT" fetch
+
+        echo "Attempting switch to '$TARGET_BRANCH'..."
         if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
             echo "Successfully switched to specific branch '$TARGET_BRANCH'."
         else
@@ -76,7 +85,6 @@ elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
         fi
     
     # Case 2: Already on u22 or generic branch -> Keep it.
-    # (We assume generic branches are intended for the default/u22 build)
     else
         echo "Current branch '$CURRENT_BRANCH' is appropriate for u22. Keeping it."
     fi
@@ -85,6 +93,8 @@ else
     echo "Error: Invalid Ubuntu version '$UBUNTU_VERSION'. Expected 'u22' or 'u24'."
     exit 1
 fi
+
+# ... [Submodule update and build logic below] ...
 
 # 2. Initialize and update submodules recursively
 # Performed after branch switching to ensure correct submodules are pulled

@@ -17,6 +17,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
   libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
 
+export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+
 git config --global --add safe.directory '*'
 
 # Cleanup: Remove previous build artifacts and the dist directory

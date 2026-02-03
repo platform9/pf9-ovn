@@ -8,7 +8,7 @@ ROOT="$(pwd)/pf9-ovn"
 
 # Install dependencies
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
   debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
   graphviz iproute2 libcap-ng-dev libnuma-dev libpcap-dev libssl-dev libtool \

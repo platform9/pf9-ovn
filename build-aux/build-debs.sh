@@ -27,40 +27,56 @@ fi
 rm -rf "$ROOT/dist"
 
 UBUNTU_VERSION=$1
-
-# Capture current branch from the OVN repo specifically
 CURRENT_BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
 
-# 1. Determine versions and switch branches based on naming convention
 if [ "$UBUNTU_VERSION" = "u24" ]; then
     # Ubuntu 24.04 (Noble)
     OVS_BASE="3.3.6"
     OVN_BASE="24.03.6"
 
-    # Logic: If current branch name does NOT contain "u24"
-    if echo "$CURRENT_BRANCH" | grep -qv "u24"; then
-        echo "Current branch '$CURRENT_BRANCH' does not contain 'u24'."
+    # Case 1: Already on a u24 branch
+    if echo "$CURRENT_BRANCH" | grep -q "u24"; then
+        echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
+    
+    # Case 2: On a u22 branch, try to swap 'u22' for 'u24'
+    elif echo "$CURRENT_BRANCH" | grep -q "u22"; then
+        # String substitution: replace 'u22' with 'u24'
+        TARGET_BRANCH="${CURRENT_BRANCH/u22/u24}"
+        echo "Current branch '$CURRENT_BRANCH' contains 'u22'. Attempting switch to '$TARGET_BRANCH'."
         
-        # Attempt to checkout the specific <branch>-u24 variant
-        if git -C "$ROOT" checkout "${CURRENT_BRANCH}-u24"; then
-            echo "Successfully switched to specific branch '${CURRENT_BRANCH}-u24'."
+        if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
+            echo "Successfully switched to specific branch '$TARGET_BRANCH'."
         else
-            echo "Specific branch '${CURRENT_BRANCH}-u24' not found. Defaulting to 'main-u24'."
+            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main-u24'."
             git -C "$ROOT" checkout "main-u24"
         fi
+    
+    # Case 3: Generic branch (no u22/u24 in name) -> Default to main-u24
     else
-        echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
+        echo "Current branch '$CURRENT_BRANCH' does not match u24 patterns. Defaulting to 'main-u24'."
+        git -C "$ROOT" checkout "main-u24"
     fi
 
 elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
-    # Ubuntu 22.04 (Jammy) - Defaulting to u22 if empty
+    # Ubuntu 22.04 (Jammy)
     OVS_BASE="3.3.1"
     OVN_BASE="24.03.2"
 
-    # Logic: If current branch name DOES contain "u24", switch to 'main' (for u22 build)
+    # Case 1: On a u24 branch, try to swap 'u24' for 'u22'
     if echo "$CURRENT_BRANCH" | grep -q "u24"; then
-        echo "Current branch '$CURRENT_BRANCH' contains 'u24' but targeting u22. Switching to 'main'."
-        git -C "$ROOT" checkout "main"
+        # String substitution: replace 'u24' with 'u22'
+        TARGET_BRANCH="${CURRENT_BRANCH/u24/u22}"
+        echo "Current branch '$CURRENT_BRANCH' contains 'u24'. Attempting switch to '$TARGET_BRANCH'."
+
+        if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
+            echo "Successfully switched to specific branch '$TARGET_BRANCH'."
+        else
+            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main'."
+            git -C "$ROOT" checkout "main"
+        fi
+    
+    # Case 2: Already on u22 or generic branch -> Keep it.
+    # (We assume generic branches are intended for the default/u22 build)
     else
         echo "Current branch '$CURRENT_BRANCH' is appropriate for u22. Keeping it."
     fi

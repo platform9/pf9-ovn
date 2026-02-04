@@ -4,6 +4,13 @@ ovn (25.09.4-1) unstable; urgency=low
 
  -- OVN team <dev@openvswitch.org>  Tue, 16 Jun 2026 12:11:30 -0400
 
+ovn (__PF9_OVN_BUILD_VERSION__) unstable; urgency=medium
+   [ Platform9 Systems ]
+   * ovn-northd: added changes to support l2 only ports
+   * container: added support to build ovn container using custom changes
+
+ -- Platform9 Systems <info@platform9.com>  Tue, 16 Dec 2025 22:00:00 -0800
+
 ovn (25.09.3-1) unstable; urgency=low
    [ OVN team ]
    * New upstream version

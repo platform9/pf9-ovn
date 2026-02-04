@@ -8403,13 +8403,16 @@ port_is_l2_only_port(const struct ovn_port *op)
 
     bool has_no_fixed_ip = op->has_unknown;
     bool port_sec_off = (op->nbsp->n_port_security == 0);
+    bool l2_port_extid = smap_get_bool(&op->nbsp->external_ids,
+                                       "l2-port", false);
 
-    VLOG_DBG("port_is_l2_only_port: %s has_no_fixed_ip=%s port_sec_off=%s",
+    VLOG_DBG("port_is_l2_only_port: %s has_no_fixed_ip=%s port_sec_off=%s l2_port_extid=%s",
              op->json_key,
              has_no_fixed_ip ? "true" : "false",
-             port_sec_off ? "true" : "false");
+             port_sec_off ? "true" : "false",
+             l2_port_extid ? "true" : "false");
 
-    return has_no_fixed_ip && port_sec_off;
+    return (has_no_fixed_ip && port_sec_off) || l2_port_extid;
 }
 
 /* Return the logical port key without surrounding quotes.

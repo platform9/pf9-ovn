@@ -183,7 +183,7 @@ ls_port_group_create(struct ls_port_group_table *ls_port_groups,
 
     *ls_pg = (struct ls_port_group) {
         .nbs = nbs,
-        .sb_datapath_key = dp->tunnel_key,
+        .sb_datapath_key = dp ? dp->tunnel_key : 0,
         .nb_pgs = HMAP_INITIALIZER(&ls_pg->nb_pgs),
     };
     hmap_insert(&ls_port_groups->entries, &ls_pg->key_node,
@@ -233,6 +233,13 @@ ls_port_group_process(struct ls_port_group_table *ls_port_groups,
     }
 
     for (size_t i = 0; i < nb_pg->n_ports; i++) {
+        if (!nb_pg->ports[i]) {
+            static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
+            VLOG_WARN_RL(&rl, "port group %s has NULL port entry at index %"PRIuSIZE".",
+                         nb_pg->name, i);
+            continue;
+        }
+
         const char *port_name = nb_pg->ports[i]->name;
         const struct ovn_datapath *od =
             northd_get_datapath_for_port(ls_ports, port_name);

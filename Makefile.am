@@ -102,6 +102,8 @@ EXTRA_DIST = \
 	.github/workflows/ovn-fake-multinode-tests.yml \
 	.readthedocs.yaml \
 	boot.sh \
+	container/Dockerfile \
+	container/Makefile \
 	$(MAN_FRAGMENTS) \
 	$(MAN_ROOTS) \
 	Vagrantfile \

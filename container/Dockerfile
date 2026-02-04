@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y -qq --no-install-recommends \
     ca-certificates \
     iproute2 iptables \
     libssl3 libunbound8 libunwind8 libjson-c5 libevent-2.1-7 libsystemd0 \

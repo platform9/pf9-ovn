@@ -8385,7 +8385,8 @@ is_vif_lsp(const struct nbrec_logical_switch_port *nbsp)
 }
 
 /* Returns true if a VIF should be treated as L2-only (no L3 addressing and
- * port security disabled). This matches the common "unknown addresses" +
+ * port security disabled). Requires explicit "l2-port" external_id to be
+ * set by Neutron, in addition to the common "unknown addresses" +
  * empty port_security case. */
 static bool
 port_is_l2_only_port(const struct ovn_port *op)
@@ -8412,7 +8413,7 @@ port_is_l2_only_port(const struct ovn_port *op)
              port_sec_off ? "true" : "false",
              l2_port_extid ? "true" : "false");
 
-    return (has_no_fixed_ip && port_sec_off) || l2_port_extid;
+    return has_no_fixed_ip && port_sec_off && l2_port_extid;
 }
 
 /* Return the logical port key without surrounding quotes.

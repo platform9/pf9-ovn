@@ -16095,8 +16095,10 @@ build_lswitch_and_lrouter_flows(
     const struct hmap *svc_monitor_map,
     const struct hmap *bfd_connections,
     const struct chassis_features *features,
-    const char *svc_monitor_mac)
+    const char *svc_monitor_mac,
+    bool mac_spoofing)
 {
+    VLOG_INFO("Building lswitch and lrouter flows with mac_spoofing: %s", mac_spoofing ? "true" : "false");
 
     char *svc_check_match = xasprintf("eth.dst == %s", svc_monitor_mac);
 
@@ -16338,6 +16340,9 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                        input_data->ls_ports, input_data->lr_ports,
                        &mcast_groups, &igmp_groups);
 
+    bool mac_spoofing = smap_get_bool(input_data->nb_options,
+                                    "pf9-allow-mac-forged-transmits", false);
+
     build_lswitch_and_lrouter_flows(input_data->ls_datapaths,
                                     input_data->lr_datapaths,
                                     input_data->ls_ports,
@@ -16352,7 +16357,7 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                                     input_data->svc_monitor_map,
                                     input_data->bfd_connections,
                                     input_data->features,
-                                    input_data->svc_monitor_mac);
+                                    input_data->svc_monitor_mac, mac_spoofing);
 
     if (parallelization_state == STATE_INIT_HASH_SIZES) {
         parallelization_state = STATE_USE_PARALLELIZATION;

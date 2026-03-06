@@ -8263,9 +8263,9 @@ add_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows){
         ds_destroy(&match);
         return;
     }
-
+ 
     for (size_t i = 0; i < n_addrs; i++) {
-        const char *mac = addrs[i].ea_s;
+        const char *mac = smap_get(&op->nbsp->external_ids, "pf9-src-mac");
         VLOG_INFO("mac_address: %s", mac);
 
         ds_clear(&match);

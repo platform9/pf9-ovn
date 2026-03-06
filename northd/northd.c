@@ -8233,6 +8233,74 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
     ds_destroy(&match);
 }
 
+/* Allow VIF traffic if and only if eth.src matches the port MAC.
+ * This preserves MAC anti-spoofing while realxing IP/ARP restrictions. 
+*/
+static void
+add_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows){
+    if (!p || !p->od || !p->nbsp) {
+        VLOG_INFO("port is null, skipping...");
+        return;
+    }
+
+    if (p->nbsp->n_port_security) {
+        VLOG_INFO("port_security enabled for port: %s, skipping...", p->key);
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+
+    /* Use logical switch port addresses (or port security if present) as the
+     * allowed MAC set for this VIF. */
+    const struct lport_addresses *addrs = p->lsp_addrs;
+    size_t n_addrs = p->n_lsp_addrs;
+
+    if (!n_addrs) { // Not Blocking ALL traffic for port without any mac.
+        VLOG_INFO("no mac address found for port: %s, skipping...", p->key);
+        ds_destroy(&match);
+        return;
+    }
+
+    for (size_t i = 0; i < n_addrs; i++) {
+        const char *mac = addrs[i].ea_s;
+        VLOG_INFO("mac_address: %s", mac);
+
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\" && eth.src == %s", p->key, mac);
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,                       /* higher than drop rules */
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL
+        );
+
+        /* ARP: ensure arp.sha matches MAC */
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\" && eth.type == 0x0806 && arp.sha == %s", p->key, mac);
+        ovn_lflow_add_with_hint(lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,
+            ds_cstr(&match),
+            "next;",
+            &p->nbsp->header_, NULL
+        );
+    }
+
+    /* Drop all other packets from this port */
+    ds_clear(&match);
+    ds_put_format(&match, "inport == \"%s\"", p->key);
+    ovn_lflow_add_with_hint(lflows, p->od,
+        S_SWITCH_IN_CHECK_PORT_SEC,
+        109,                        /* lower priority than the rules above, which would result in all packet drops where src mac is forged. */
+        ds_cstr(&match),
+        "reg0[15]=1; next;",        /* instead of a direct 'drop;', telling ovn that it violates port security */
+        &p->nbsp->header_, NULL);
+
+    ds_destroy(&match);
+}
+
 /* Minimal and scoped port-security bypass for L2-only VIFs.
  * - Only affects this single VIF.
  * - Keeps stage ordering intact (still runs later stages).
@@ -16095,11 +16163,8 @@ build_lswitch_and_lrouter_flows(
     const struct hmap *svc_monitor_map,
     const struct hmap *bfd_connections,
     const struct chassis_features *features,
-    const char *svc_monitor_mac,
-    bool mac_spoofing)
+    const char *svc_monitor_mac)
 {
-    VLOG_INFO("Building lswitch and lrouter flows with mac_spoofing: %s", mac_spoofing ? "true" : "false");
-
     char *svc_check_match = xasprintf("eth.dst == %s", svc_monitor_mac);
 
     if (parallelization_state == STATE_USE_PARALLELIZATION) {
@@ -16207,17 +16272,42 @@ build_lswitch_and_lrouter_flows(
                                               lsi.lflows);
         }
 
+        /* Handle Mac Spoofing Prevention:
+         * - deny packets if src mac != vif
+         * - only apply when port security is off
+        */
+        VLOG_INFO("adding mac_spoofing protections...");
+        HMAP_FOR_EACH(op, key_node, lsi.ls_ports) {
+            if (!op || !op->od || !op->nbsp) {
+                VLOG_INFO("port is null, skipping...");
+                continue;
+            }
+
+            bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
+            VLOG_INFO("Processing LSP: key=%s, tunnel_key=%u, allow_forged_mac=%s", 
+                        op->key, 
+                        op->tunnel_key,
+                        allow_forged_mac ? "true" : "false");
+
+            if (!allow_forged_mac) {
+                add_mac_spoofing_prevention(op, lsi.lflows);
+            }
+        }
+
         /* Handle L2-only VIFs:
          * - minimally bypass port security for that port only
          * - add unknown-unicast fallback at OUT_L2_LKUP
          *
          * Both are low/specific priority so the standard pipeline keeps
          * taking precedence when applicable. */
+        VLOG_INFO("processing l2_only ports...");
         HMAP_FOR_EACH (op, key_node, lsi.ls_ports) {
             if (!op || !op->od || !op->nbsp) {
+                VLOG_INFO("port is null, skipping.");
                 continue;
             }
             if (!port_is_l2_only_port(op)) {
+                VLOG_INFO("port is not l2_only, skipping.");
                 continue;
             }
 
@@ -16340,9 +16430,6 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                        input_data->ls_ports, input_data->lr_ports,
                        &mcast_groups, &igmp_groups);
 
-    bool mac_spoofing = smap_get_bool(input_data->nb_options,
-                                    "pf9-allow-mac-forged-transmits", false);
-
     build_lswitch_and_lrouter_flows(input_data->ls_datapaths,
                                     input_data->lr_datapaths,
                                     input_data->ls_ports,
@@ -16357,7 +16444,7 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                                     input_data->svc_monitor_map,
                                     input_data->bfd_connections,
                                     input_data->features,
-                                    input_data->svc_monitor_mac, mac_spoofing);
+                                    input_data->svc_monitor_mac);
 
     if (parallelization_state == STATE_INIT_HASH_SIZES) {
         parallelization_state = STATE_USE_PARALLELIZATION;

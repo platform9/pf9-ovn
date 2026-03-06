@@ -8247,6 +8247,9 @@ add_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows){
         VLOG_INFO("port_security enabled for port: %s, skipping...", p->key);
         return;
     }
+    if (!port_is_l2_only_port(p)) {
+        return;
+    }
 
     struct ds match = DS_EMPTY_INITIALIZER;
 

@@ -8224,7 +8224,7 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
 
     ovn_lflow_add_with_hint(lflows, p->od,
                             S_SWITCH_IN_L2_LKUP,
-                            120,
+                            100,
                             ds_cstr(&match),
                             "outport = \"" MC_FLOOD_L2 "\"; output;",
                             &p->nbsp->header_, NULL);
@@ -8233,75 +8233,93 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
     ds_destroy(&match);
 }
 
+/*
+ * For L2-only VIFs, add flow to send packet to specific port when dst eth matches at the *egress* L2 lookup stage. 
+*/
+static void
+add_l2only_eth_dst_flow(struct ovn_port *p, struct hmap *lflows, const char *src_mac)
+{
+    if (!p || !p->od || !p->nbsp || !port_is_l2_only_port(p)) {
+        return;
+    }
+
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds action   = DS_EMPTY_INITIALIZER;
+
+    /* Flood everything EXCEPT multicast (keeps IGMP/MLD scoping). */
+    ds_clear(&match);
+    ds_clear(&action);
+    ds_put_format(&match, "eth.dst == %s", src_mac);
+    ds_put_format(&action, "outport = \"%s\"; output;", p->key);
+
+    ovn_lflow_add_with_hint(lflows, p->od,
+                            S_SWITCH_IN_L2_LKUP,
+                            110,                /* Priority greater than l2only_flood_all */
+                            ds_cstr(&match),
+                            ds_cstr(&action),
+                            &p->nbsp->header_, NULL);
+
+    ds_destroy(&action);
+    ds_destroy(&match);
+}
+
 /* Allow VIF traffic if and only if eth.src matches the port MAC.
  * This preserves MAC anti-spoofing while realxing IP/ARP restrictions. 
 */
 static void
-add_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows){
+add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, const char* src_mac){
     if (!p || !p->od || !p->nbsp) {
         VLOG_INFO("port is null, skipping...");
         return;
     }
 
-    if (p->nbsp->n_port_security) {
-        VLOG_INFO("port_security enabled for port: %s, skipping...", p->key);
-        return;
-    }
     if (!port_is_l2_only_port(p)) {
         return;
     }
 
     struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds action = DS_EMPTY_INITIALIZER;
 
-    /* Use logical switch port addresses (or port security if present) as the
-     * allowed MAC set for this VIF. */
-    const struct lport_addresses *addrs = p->lsp_addrs;
-    size_t n_addrs = p->n_lsp_addrs;
+    /* Use src_mac as the allowed MAC set for this VIF. */
+    VLOG_INFO("Adding mac_spoofing prevention to port %s, mac_address: %s", p->key, src_mac);
 
-    if (!n_addrs) { // Not Blocking ALL traffic for port without any mac.
-        VLOG_INFO("no mac address found for port: %s, skipping...", p->key);
-        ds_destroy(&match);
-        return;
-    }
- 
-    for (size_t i = 0; i < n_addrs; i++) {
-        const char *mac = smap_get(&op->nbsp->external_ids, "pf9-src-mac");
-        VLOG_INFO("mac_address: %s", mac);
-
-        ds_clear(&match);
-        ds_put_format(&match, "inport == \"%s\" && eth.src == %s", p->key, mac);
-        ovn_lflow_add_with_hint(
-            lflows, p->od,
-            S_SWITCH_IN_CHECK_PORT_SEC,
-            110,                       /* higher than drop rules */
-            ds_cstr(&match),
-            "next;",
-            &p->nbsp->header_, NULL
-        );
-
-        /* ARP: ensure arp.sha matches MAC */
-        ds_clear(&match);
-        ds_put_format(&match, "inport == \"%s\" && eth.type == 0x0806 && arp.sha == %s", p->key, mac);
-        ovn_lflow_add_with_hint(lflows, p->od,
-            S_SWITCH_IN_CHECK_PORT_SEC,
-            110,
-            ds_cstr(&match),
-            "next;",
-            &p->nbsp->header_, NULL
-        );
-    }
-
-    /* Drop all other packets from this port */
     ds_clear(&match);
-    ds_put_format(&match, "inport == \"%s\"", p->key);
+    ds_clear(&action);
+    ds_put_format(&match, "inport == \"%s\" && eth.src != %s", p->key, src_mac);
+    ds_put_format(&action, "%s=1; next;", REGBIT_PORT_SEC_DROP);
+    ovn_lflow_add_with_hint(
+        lflows, p->od,
+        S_SWITCH_IN_CHECK_PORT_SEC,
+        110,                       /* higher than minimal_portsec_bypass rules */
+        ds_cstr(&match),
+        ds_cstr(&action),
+        &p->nbsp->header_, NULL
+    );
+
+    /* ARP: ensure arp.sha matches MAC */
+    ds_clear(&match);
+    ds_put_format(&match, "inport == \"%s\" && eth.type == 0x0806 && arp.sha != %s", p->key, src_mac);
     ovn_lflow_add_with_hint(lflows, p->od,
         S_SWITCH_IN_CHECK_PORT_SEC,
-        109,                        /* lower priority than the rules above, which would result in all packet drops where src mac is forged. */
+        110,                        /* higher than minimal_portsec_bypass rules */
         ds_cstr(&match),
-        "reg0[15]=1; next;",        /* instead of a direct 'drop;', telling ovn that it violates port security */
-        &p->nbsp->header_, NULL);
+        ds_cstr(&action),
+        &p->nbsp->header_, NULL
+    );
+
+    /* Drop wherever REGBIT_PORT_SEC_DROP=1 with a higher priority than minimal_portsec_bypass */
+    ds_clear(&match);
+    ds_put_format(&match, "inport == \"%s\" && %s == 1", p->key, REGBIT_PORT_SEC_DROP);
+    ovn_lflow_add_with_hint(lflows, p->od,
+        S_SWITCH_IN_APPLY_PORT_SEC,
+        110,                        /* higher than minimal_portsec_bypass rules */
+        ds_cstr(&match),
+        debug_drop_action(),
+        &p->nbsp->header_, NULL
+    );
 
     ds_destroy(&match);
+    ds_destroy(&action);
 }
 
 /* Minimal and scoped port-security bypass for L2-only VIFs.
@@ -16275,28 +16293,6 @@ build_lswitch_and_lrouter_flows(
                                               lsi.lflows);
         }
 
-        /* Handle Mac Spoofing Prevention:
-         * - deny packets if src mac != vif
-         * - only apply when port security is off
-        */
-        VLOG_INFO("adding mac_spoofing protections...");
-        HMAP_FOR_EACH(op, key_node, lsi.ls_ports) {
-            if (!op || !op->od || !op->nbsp) {
-                VLOG_INFO("port is null, skipping...");
-                continue;
-            }
-
-            bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
-            VLOG_INFO("Processing LSP: key=%s, tunnel_key=%u, allow_forged_mac=%s", 
-                        op->key, 
-                        op->tunnel_key,
-                        allow_forged_mac ? "true" : "false");
-
-            if (!allow_forged_mac) {
-                add_mac_spoofing_prevention(op, lsi.lflows);
-            }
-        }
-
         /* Handle L2-only VIFs:
          * - minimally bypass port security for that port only
          * - add unknown-unicast fallback at OUT_L2_LKUP
@@ -16316,8 +16312,20 @@ build_lswitch_and_lrouter_flows(
 
             VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
                       op->json_key);
+            
+            bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
+            char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
+
+            VLOG_INFO("port: %s; src_mac: %s; allow_forged_mac: %s", op->key, src_mac, allow_forged_mac ? "true" : "false");
+
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
+            if (src_mac && src_mac[0]) {
+                add_l2only_eth_dst_flow(op, lsi.lflows, src_mac);
+            }
+            if (!allow_forged_mac && src_mac && src_mac[0]) {
+                add_l2only_mac_spoofing_prevention(op, lflows, src_mac);
+            }
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
 /* PF9 stop */

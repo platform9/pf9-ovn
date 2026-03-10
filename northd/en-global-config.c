@@ -54,6 +54,7 @@ en_global_config_init(struct engine_node *node OVS_UNUSED,
     struct ed_type_global_config *data = xzalloc(sizeof *data);
     smap_init(&data->nb_options);
     smap_init(&data->sb_options);
+    sset_init(&data->pf9_mac_learning_skip);
     northd_enable_all_features(data);
     return data;
 }
@@ -98,6 +99,27 @@ en_global_config_run(struct engine_node *node , void *data)
         } else {
             monitor_mac = NULL;
         }
+    }
+
+    const char* skip_macs = smap_get(&nb->external_ids, "pf9-mac-learning-skip");
+    sset_clear(&config_data->pf9_mac_learning_skip);
+    if (skip_macs && skip_macs[0]) {
+        struct sset raw = SSET_INITIALIZER(&raw);
+        sset_from_delimited_string(&raw, skip_macs, ",");
+
+        const char *mac;
+        SSET_FOR_EACH(mac, &raw) {
+            struct eth_addr ea;
+            if (eth_addr_from_string(mac, &ea)){
+                char mac_str[ETH_ADDR_STRLEN + 1];
+                snprintf(mac_str, sizeof mac_str, ETH_ADDR_FMT, ETH_ADDR_ARGS(ea));
+                VLOG_INFO("adding mac_address: %s to pf9-mac-learning-skip.", mac_str);
+                sset_add(&config_data->pf9_mac_learning_skip, mac_str);
+            }else {
+                VLOG_INFO("invalid mac_address: %s, skipping addition to pf9-mac-learning-skip...", mac);
+            }
+        }
+        sset_destroy(&raw);
     }
 
     struct smap *options = &config_data->nb_options;
@@ -154,6 +176,17 @@ en_global_config_run(struct engine_node *node , void *data)
         sbrec_sb_global_set_ipsec(sb, nb->ipsec);
     }
 
+    VLOG_INFO("Adding pf9-mac-learning-skip to sb_global...");
+    struct svec mac_list = SVEC_EMPTY_INITIALIZER;
+    const char *m;
+    SSET_FOR_EACH(m, &config_data->pf9_mac_learning_skip) {
+        svec_add(&mac_list, m);
+    }
+    char *joined = svec_join(&mac_list, ",", "");
+    sbrec_sb_global_update_external_ids_setkey(sb, "pf9-mac-learning-skip", joined);
+    free(joined);
+    svec_destroy(&mac_list);
+
     /* Set up SB_Global (depends on chassis features). */
     update_sb_config_options_to_sbrec(config_data, sb);
 
@@ -165,6 +198,7 @@ void en_global_config_cleanup(void *data OVS_UNUSED)
     struct ed_type_global_config *config_data = data;
     smap_destroy(&config_data->nb_options);
     smap_destroy(&config_data->sb_options);
+    sset_destroy(&config_data->pf9_mac_learning_skip);
     destroy_debug_config();
 }
 
@@ -197,9 +231,9 @@ global_config_nb_global_handler(struct engine_node *node, void *data)
         return false;
     }
 
-    /* We are only interested in ipsec and options column. */
+    /* We are only interested in ipsec, options, and external_ids column. */
     if (!nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_IPSEC)
-        && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_OPTIONS)) {
+        && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_OPTIONS) && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_EXTERNAL_IDS)) {
         return true;
     }
 

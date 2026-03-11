@@ -5791,13 +5791,33 @@ build_lswitch_learn_fdb_op(
 static void
 build_lswitch_learn_fdb_od(
     struct ovn_datapath *od, struct lflow_table *lflows,
-    struct lflow_ref *lflow_ref)
+    struct lflow_ref *lflow_ref, const struct sset *pf9_skip_macs)
 {
     ovs_assert(od->nbs);
     ovn_lflow_add(lflows, od, S_SWITCH_IN_LOOKUP_FDB, 0, "1", "next;",
                   lflow_ref);
     ovn_lflow_add(lflows, od, S_SWITCH_IN_PUT_FDB, 0, "1", "next;",
                   lflow_ref);
+    
+    /* Add a high priority rule to prevent put_fdb for all pf9-mac-learning-skip macs. */
+    VLOG_INFO("adding put_fdb prevention rules for pf9-skip-mac-learning macs...");
+    struct ds match = DS_EMPTY_INITIALIZER;
+    const char *skip_mac;
+    SSET_FOR_EACH(skip_mac, pf9_skip_macs){
+        VLOG_INFO("adding put_fdb prevention rule for mac: %s...", skip_mac);
+        ds_clear(&match);
+        ds_put_format(&match, "eth.src == %s", skip_mac);
+        ovn_lflow_add(lflows,
+            od,
+            S_SWITCH_IN_PUT_FDB,
+            110,                /* High Priority Rule */
+            ds_cstr(&match),
+            "next;",
+            lflow_ref
+        );
+    }
+    ds_destroy(&match);
+
     ovn_lflow_add(lflows, od, S_SWITCH_IN_L2_LKUP, 0, "1",
                   "outport = get_fdb(eth.dst); next;", lflow_ref);
 }
@@ -15820,6 +15840,7 @@ struct lswitch_flow_build_info {
     struct ds actions;
     size_t thread_lflow_counter;
     const char *svc_monitor_mac;
+    const struct sset *pf9_skip_macs;
 };
 
 /* Helper function to combine all lflow generation which is iterated by
@@ -15838,7 +15859,7 @@ build_lswitch_and_lrouter_iterate_by_ls(struct ovn_datapath *od,
 
     build_fwd_group_lflows(od, lsi->lflows, NULL);
     build_lswitch_lflows_admission_control(od, lsi->lflows, NULL);
-    build_lswitch_learn_fdb_od(od, lsi->lflows, NULL);
+    build_lswitch_learn_fdb_od(od, lsi->lflows, NULL, lsi->pf9_skip_macs);
     build_lswitch_arp_nd_responder_default(od, lsi->lflows, NULL);
     build_lswitch_dns_lookup_and_response(od, lsi->lflows, lsi->meter_groups,
                                           NULL);
@@ -16184,8 +16205,9 @@ build_lswitch_and_lrouter_flows(
     const struct hmap *svc_monitor_map,
     const struct hmap *bfd_connections,
     const struct chassis_features *features,
-    const char *svc_monitor_mac)
-{
+    const char *svc_monitor_mac,
+    const struct sset *pf9_skip_macs
+){
     char *svc_check_match = xasprintf("eth.dst == %s", svc_monitor_mac);
 
     if (parallelization_state == STATE_USE_PARALLELIZATION) {
@@ -16219,6 +16241,7 @@ build_lswitch_and_lrouter_flows(
             lsiv[index].svc_monitor_mac = svc_monitor_mac;
             ds_init(&lsiv[index].match);
             ds_init(&lsiv[index].actions);
+            lsiv[index].pf9_skip_macs = pf9_skip_macs;
 
             build_lflows_pool->controls[index].data = &lsiv[index];
         }
@@ -16259,6 +16282,7 @@ build_lswitch_and_lrouter_flows(
             .svc_monitor_mac = svc_monitor_mac,
             .match = DS_EMPTY_INITIALIZER,
             .actions = DS_EMPTY_INITIALIZER,
+            .pf9_skip_macs = pf9_skip_macs
         };
 
         /* Combined build - all lflow generation from lswitch and lrouter
@@ -16314,7 +16338,7 @@ build_lswitch_and_lrouter_flows(
                       op->json_key);
             
             bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
-            char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
+            const char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
 
             VLOG_INFO("port: %s; src_mac: %s; allow_forged_mac: %s", op->key, src_mac, allow_forged_mac ? "true" : "false");
 
@@ -16455,7 +16479,9 @@ void build_lflows(struct ovsdb_idl_txn *ovnsb_txn,
                                     input_data->svc_monitor_map,
                                     input_data->bfd_connections,
                                     input_data->features,
-                                    input_data->svc_monitor_mac);
+                                    input_data->svc_monitor_mac,
+                                    input_data->pf9_mac_learning_skip
+                                );
 
     if (parallelization_state == STATE_INIT_HASH_SIZES) {
         parallelization_state = STATE_USE_PARALLELIZATION;

@@ -101,6 +101,7 @@ en_global_config_run(struct engine_node *node , void *data)
         }
     }
 
+    VLOG_INFO("checking for pf9-mac-learning-skip in nb_global...");
     const char* skip_macs = smap_get(&nb->external_ids, "pf9-mac-learning-skip");
     sset_clear(&config_data->pf9_mac_learning_skip);
     if (skip_macs && skip_macs[0]) {
@@ -176,16 +177,21 @@ en_global_config_run(struct engine_node *node , void *data)
         sbrec_sb_global_set_ipsec(sb, nb->ipsec);
     }
 
-    VLOG_INFO("Adding pf9-mac-learning-skip to sb_global...");
-    struct svec mac_list = SVEC_EMPTY_INITIALIZER;
-    const char *m;
-    SSET_FOR_EACH(m, &config_data->pf9_mac_learning_skip) {
-        svec_add(&mac_list, m);
+    if (!sset_is_empty(&config_data->pf9_mac_learning_skip)) {
+        VLOG_INFO("updating pf9-mac-learning-skip to sb_global...");
+        struct svec mac_list = SVEC_EMPTY_INITIALIZER;
+        const char *m;
+        SSET_FOR_EACH(m, &config_data->pf9_mac_learning_skip) {
+            svec_add(&mac_list, m);
+        }
+        char *joined = svec_join(&mac_list, ",", "");
+        sbrec_sb_global_update_external_ids_setkey(sb, "pf9-mac-learning-skip", joined);
+        free(joined);
+        svec_destroy(&mac_list);
+    }else{
+        VLOG_INFO("removing pf9-mac-learning-skip from sb_global...");
+        sbrec_sb_global_update_external_ids_delkey(sb, "pf9-mac-learning-skip");
     }
-    char *joined = svec_join(&mac_list, ",", "");
-    sbrec_sb_global_update_external_ids_setkey(sb, "pf9-mac-learning-skip", joined);
-    free(joined);
-    svec_destroy(&mac_list);
 
     /* Set up SB_Global (depends on chassis features). */
     update_sb_config_options_to_sbrec(config_data, sb);
@@ -231,6 +237,7 @@ global_config_nb_global_handler(struct engine_node *node, void *data)
         return false;
     }
 
+    VLOG_INFO("checking if nb_global changed...");
     /* We are only interested in ipsec, options, and external_ids column. */
     if (!nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_IPSEC)
         && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_OPTIONS) && !nbrec_nb_global_is_updated(nb, NBREC_NB_GLOBAL_COL_EXTERNAL_IDS)) {
@@ -243,6 +250,14 @@ global_config_nb_global_handler(struct engine_node *node, void *data)
 
     struct ed_type_global_config *config_data = data;
     config_data->tracked = true;
+
+    /* Return false if pf9-mac-learning-skip is out of sync and requires updating the
+     * NB config.
+    */
+    if (config_out_of_sync(&nb->external_ids, &sb->external_ids, "pf9-mac-learning-skip", false)) {
+        VLOG_INFO("found pf9-mac-learning-skip out of sync.");
+        return false;
+    }
 
     if (smap_equal(&nb->options, &config_data->nb_options)) {
         return true;

@@ -8271,7 +8271,7 @@ add_l2only_eth_dst_flow(struct ovn_port *p, struct hmap *lflows, const char *src
 static void
 add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, const char* src_mac){
     if (!p || !p->od || !p->nbsp) {
-        VLOG_INFO("port is null, skipping...");
+        VLOG_DBG("port is null, skipping...");
         return;
     }
 
@@ -8283,7 +8283,7 @@ add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, cons
     struct ds action = DS_EMPTY_INITIALIZER;
 
     /* Use src_mac as the allowed MAC set for this VIF. */
-    VLOG_INFO("Adding mac_spoofing prevention to port %s, mac_address: %s", p->key, src_mac);
+    VLOG_DBG("Adding mac_spoofing prevention to port %s, mac_address: %s", p->key, src_mac);
 
     ds_clear(&match);
     ds_clear(&action);
@@ -16301,24 +16301,24 @@ build_lswitch_and_lrouter_flows(
          *
          * Both are low/specific priority so the standard pipeline keeps
          * taking precedence when applicable. */
-        VLOG_INFO("processing l2_only ports...");
+        VLOG_DBG("processing l2_only ports...");
         HMAP_FOR_EACH (op, key_node, lsi.ls_ports) {
             if (!op || !op->od || !op->nbsp) {
-                VLOG_INFO("port is null, skipping.");
+                VLOG_DBG("port is null, skipping.");
                 continue;
             }
             if (!port_is_l2_only_port(op)) {
-                VLOG_INFO("port is not l2_only, skipping.");
+                VLOG_DBG("port is not l2_only, skipping.");
                 continue;
             }
 
-            VLOG_INFO("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
+            VLOG_DBG("L2-only VIF detected on %s; adding port-sec bypass + uu fallback",
                       op->json_key);
             
             bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
             char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
 
-            VLOG_INFO("port: %s; src_mac: %s; allow_forged_mac: %s", op->key, src_mac, allow_forged_mac ? "true" : "false");
+            VLOG_DBG("port: %s; src_mac: %s; allow_forged_mac: %s", op->key, src_mac, allow_forged_mac ? "true" : "false");
 
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);

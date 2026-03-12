@@ -8224,44 +8224,12 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
 
     ovn_lflow_add_with_hint(lflows, p->od,
                             S_SWITCH_IN_L2_LKUP,
-                            100,
+                            120,
                             ds_cstr(&match),
                             "outport = \"" MC_FLOOD_L2 "\"; output;",
                             &p->nbsp->header_, NULL);
 
     ds_destroy(&unq);
-    ds_destroy(&match);
-}
-
-/*
- * For L2-only VIFs, add flow to send packet to specific port when dst eth matches at the *egress* L2 lookup stage. 
-*/
-static void
-add_l2only_eth_dst_flow(struct ovn_port *p, struct hmap *lflows, const char *src_mac)
-{
-    if (!p || !p->od || !p->nbsp || !port_is_l2_only_port(p)) {
-        return;
-    }
-
-    struct ds match = DS_EMPTY_INITIALIZER;
-    struct ds action   = DS_EMPTY_INITIALIZER;
-
-    const struct eth_addr ea;
-    if(eth_addr_from_string(src_mac, &ea) && !eth_addr_is_multicast(ea) && !eth_addr_is_broadcast(ea)){
-        ds_clear(&match);
-        ds_clear(&action);
-        ds_put_format(&match, "eth.dst == %s", src_mac);
-        ds_put_format(&action, "outport = \"%s\"; output;", p->key);
-
-        ovn_lflow_add_with_hint(lflows, p->od,
-                                S_SWITCH_IN_L2_LKUP,
-                                110,                /* Priority greater than l2only_flood_all */
-                                ds_cstr(&match),
-                                ds_cstr(&action),
-                                &p->nbsp->header_, NULL);
-    }
-
-    ds_destroy(&action);
     ds_destroy(&match);
 }
 
@@ -8285,40 +8253,45 @@ add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, cons
     /* Use src_mac as the allowed MAC set for this VIF. */
     VLOG_DBG("Adding mac_spoofing prevention to port %s, mac_address: %s", p->key, src_mac);
 
-    ds_clear(&match);
-    ds_clear(&action);
-    ds_put_format(&match, "inport == \"%s\" && eth.src != %s", p->key, src_mac);
-    ds_put_format(&action, "%s=1; next;", REGBIT_PORT_SEC_DROP);
-    ovn_lflow_add_with_hint(
-        lflows, p->od,
-        S_SWITCH_IN_CHECK_PORT_SEC,
-        110,                       /* higher than minimal_portsec_bypass rules */
-        ds_cstr(&match),
-        ds_cstr(&action),
-        &p->nbsp->header_, NULL
-    );
+    struct eth_addr ea;
+    if (eth_addr_from_string(src_mac, &ea)) {
+        ds_clear(&match);
+        ds_clear(&action);
+        ds_put_format(&match, "inport == \"%s\" && eth.src != %s", p->key, src_mac);
+        ds_put_format(&action, "%s=1; next;", REGBIT_PORT_SEC_DROP);
+        ovn_lflow_add_with_hint(
+            lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,                       /* higher than minimal_portsec_bypass rules */
+            ds_cstr(&match),
+            ds_cstr(&action),
+            &p->nbsp->header_, NULL
+        );
 
-    /* ARP: ensure arp.sha matches MAC */
-    ds_clear(&match);
-    ds_put_format(&match, "inport == \"%s\" && eth.type == 0x0806 && arp.sha != %s", p->key, src_mac);
-    ovn_lflow_add_with_hint(lflows, p->od,
-        S_SWITCH_IN_CHECK_PORT_SEC,
-        110,                        /* higher than minimal_portsec_bypass rules */
-        ds_cstr(&match),
-        ds_cstr(&action),
-        &p->nbsp->header_, NULL
-    );
+        /* ARP: ensure arp.sha matches MAC */
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\" && eth.type == 0x0806 && arp.sha != %s", p->key, src_mac);
+        ovn_lflow_add_with_hint(lflows, p->od,
+            S_SWITCH_IN_CHECK_PORT_SEC,
+            110,                        /* higher than minimal_portsec_bypass rules */
+            ds_cstr(&match),
+            ds_cstr(&action),
+            &p->nbsp->header_, NULL
+        );
 
-    /* Drop wherever REGBIT_PORT_SEC_DROP=1 with a higher priority than minimal_portsec_bypass */
-    ds_clear(&match);
-    ds_put_format(&match, "inport == \"%s\" && %s == 1", p->key, REGBIT_PORT_SEC_DROP);
-    ovn_lflow_add_with_hint(lflows, p->od,
-        S_SWITCH_IN_APPLY_PORT_SEC,
-        110,                        /* higher than minimal_portsec_bypass rules */
-        ds_cstr(&match),
-        debug_drop_action(),
-        &p->nbsp->header_, NULL
-    );
+        /* Drop wherever REGBIT_PORT_SEC_DROP=1 with a higher priority than minimal_portsec_bypass */
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\" && %s == 1", p->key, REGBIT_PORT_SEC_DROP);
+        ovn_lflow_add_with_hint(lflows, p->od,
+            S_SWITCH_IN_APPLY_PORT_SEC,
+            110,                        /* higher than minimal_portsec_bypass rules */
+            ds_cstr(&match),
+            debug_drop_action(),
+            &p->nbsp->header_, NULL
+        );
+    }else {
+        VLOG_WARN("invalid mac_address: %s for port %s, skipping mac spoofing prevention...", src_mac, p->key);
+    }
 
     ds_destroy(&match);
     ds_destroy(&action);
@@ -16322,9 +16295,6 @@ build_lswitch_and_lrouter_flows(
 
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
-            if (src_mac && src_mac[0]) {
-                add_l2only_eth_dst_flow(op, lsi.lflows, src_mac);
-            }
             if (!allow_forged_mac && src_mac && src_mac[0]) {
                 add_l2only_mac_spoofing_prevention(op, lflows, src_mac);
             }

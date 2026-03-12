@@ -8246,18 +8246,20 @@ add_l2only_eth_dst_flow(struct ovn_port *p, struct hmap *lflows, const char *src
     struct ds match = DS_EMPTY_INITIALIZER;
     struct ds action   = DS_EMPTY_INITIALIZER;
 
-    /* Flood everything EXCEPT multicast (keeps IGMP/MLD scoping). */
-    ds_clear(&match);
-    ds_clear(&action);
-    ds_put_format(&match, "eth.dst == %s", src_mac);
-    ds_put_format(&action, "outport = \"%s\"; output;", p->key);
+    const struct eth_addr ea;
+    if(eth_addr_from_string(src_mac, &ea) && !eth_addr_is_multicast(ea) && !eth_addr_is_broadcast(ea)){
+        ds_clear(&match);
+        ds_clear(&action);
+        ds_put_format(&match, "eth.dst == %s", src_mac);
+        ds_put_format(&action, "outport = \"%s\"; output;", p->key);
 
-    ovn_lflow_add_with_hint(lflows, p->od,
-                            S_SWITCH_IN_L2_LKUP,
-                            110,                /* Priority greater than l2only_flood_all */
-                            ds_cstr(&match),
-                            ds_cstr(&action),
-                            &p->nbsp->header_, NULL);
+        ovn_lflow_add_with_hint(lflows, p->od,
+                                S_SWITCH_IN_L2_LKUP,
+                                110,                /* Priority greater than l2only_flood_all */
+                                ds_cstr(&match),
+                                ds_cstr(&action),
+                                &p->nbsp->header_, NULL);
+    }
 
     ds_destroy(&action);
     ds_destroy(&match);

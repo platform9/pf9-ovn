@@ -8302,7 +8302,7 @@ add_l2_port_sec(struct ovn_port *p, struct hmap *lflows){
         return;
     }
 
-    if (port_is_l2_only_port(p) || p->nbsp->n_port_security || p->nbsp->type == "localport" || p->nbsp->type == "localnet") {
+    if (port_is_l2_only_port(p) || p->nbsp->n_port_security || strcmp(p->nbsp->type, "localport") || strcmp(p->nbsp->type, "localnet")) {
         return;
     }
 

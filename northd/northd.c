@@ -8314,7 +8314,6 @@ add_l2_port_sec(struct ovn_port *p, struct hmap *lflows){
         char *src_mac = p->lsp_addrs[i].ea_s;
         /* Use src_mac as the allowed MAC set for this VIF. */
         if (eth_addr_from_string(src_mac, &ea)) {
-            VLOG_INFO("Adding flows for src_mac");
             ds_clear(&match);
             ds_clear(&action);
             ds_put_format(&match, "inport == \"%s\" && eth.src != %s", p->key, src_mac);

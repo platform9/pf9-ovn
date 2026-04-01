@@ -1,6 +1,7 @@
 EXTRA_DIST += \
     build-aux/build-debs.sh \
 	build-aux/calculate-pipeline-cksum \
+    build-aux/build-rpms.sh \
 	build-aux/calculate-schema-cksum \
 	build-aux/cccl \
 	build-aux/cksum-pipeline-check \

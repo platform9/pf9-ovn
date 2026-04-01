@@ -6,13 +6,17 @@ source pf9-version/pf9-version.rc
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
+# Enable EPEL and CRB repos for additional packages
+dnf install -y epel-release
+dnf config-manager --set-enabled crb
+
 # Install dependencies
 dnf install -y \
   rpm-build rpmdevtools autoconf automake libtool gcc gcc-c++ \
   openssl-devel python3-devel systemd-units checkpolicy \
   selinux-policy-devel groff graphviz libcap-ng-devel \
   unbound-devel procps-ng bzip2 git createrepo_c \
-  libpcap-devel libnuma-devel python3-sphinx python3-sortedcontainers \
+  libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
   libevent-devel json-c-devel libunwind-devel
 
 git config --global --add safe.directory '*'
@@ -120,6 +124,8 @@ find "$ROOT/ovs/rpm/rpmbuild/RPMS" -name "*.rpm" -exec cp -v {} "$ARTIFACT_DIR" 
 
 # Collect OVN RPMs
 find "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" -exec cp -v {} "$ARTIFACT_DIR" \;
+
+ls -lh "$ARTIFACT_DIR"
 
 # --- CLEANUP ---
 cd "$ROOT"

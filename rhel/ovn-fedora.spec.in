@@ -82,7 +82,7 @@ Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
 Requires: firewalld-filesystem
-Obsoletes: openvswitch-ovn-central
+Obsoletes: openvswitch-ovn-central < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-central = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description central
@@ -93,7 +93,7 @@ Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
 Requires: firewalld-filesystem
-Obsoletes: openvswitch-ovn-host
+Obsoletes: openvswitch-ovn-host < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-host = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description host
@@ -103,7 +103,7 @@ OVN controller running on each host.
 Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
-Obsoletes: openvswitch-ovn-vtep
+Obsoletes: openvswitch-ovn-vtep < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-vtep = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description vtep
@@ -113,7 +113,7 @@ OVN vtep controller
 Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn python3-openvswitch
-Obsoletes: openvswitch-ovn-docker
+Obsoletes: openvswitch-ovn-docker < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-docker = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description docker

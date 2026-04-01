@@ -115,6 +115,9 @@ OVSDIR=$ROOT/ovs
 OVSBUILDDIR="$OVSDIR"
 export OVSDIR OVSBUILDDIR OVSVERSION=${OVS_BASE}
 
+./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc \
+    --with-ovs-source="$OVSDIR"
+
 make rpm-fedora RPMBUILD_OPT="--without check"
 
 # --- ARTIFACT COLLECTION ---

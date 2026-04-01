@@ -13,11 +13,12 @@ dnf config-manager --set-enabled crb
 # Install dependencies
 dnf install -y \
   rpm-build rpmdevtools autoconf automake libtool gcc gcc-c++ \
-  openssl-devel python3-devel systemd-units checkpolicy \
+  openssl openssl-devel python3-devel systemd-units checkpolicy \
   selinux-policy-devel groff graphviz libcap-ng-devel \
-  unbound-devel procps-ng bzip2 git createrepo_c \
+  unbound unbound-devel procps-ng bzip2 git createrepo_c \
   libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
-  libevent-devel json-c-devel libunwind-devel
+  libevent-devel json-c-devel libunwind-devel \
+  desktop-file-utils libbpf-devel libxdp-devel
 
 git config --global --add safe.directory '*'
 git config --global url."https://github.com/".insteadOf "git@github.com:"

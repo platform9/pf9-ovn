@@ -93,13 +93,17 @@ printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
 sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure.ac"
 
 # --- OVS CONFIGURATION ---
-PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}.${ROCKY_VERSION}
+# Static version (no build counter): only bump manually when OVS code changes
+PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${ROCKY_VERSION}
 printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # Update OVS configure.ac
 sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
 
 # --- BUILD OVS ---
+# Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
+sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+
 ( cd "$ROOT/ovs" && ./boot.sh )
 ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
 ( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )

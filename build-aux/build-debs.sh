@@ -114,7 +114,10 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/configure.ac"
 
 # --- OVS CONFIGURATION ---
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
+# Static version (no build counter): only bump manually when OVS code changes.
+# Epoch 1 beats upstream; omitting build counter means existing CI-versioned
+# installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
+PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9
 if [ "$UBUNTU_VERSION" = "u22" ]; then
   printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 fi

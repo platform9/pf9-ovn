@@ -21,7 +21,7 @@ set -e
 
 case "$1" in
     purge)
-        rm -f /etc/default/ovn-host
+        rm -f /etc/default/ovn-controller
         rm -f /var/log/ovn/ovn-controller.log* || true
         ;;
 

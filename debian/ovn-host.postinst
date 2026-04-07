@@ -20,7 +20,7 @@ set -e
 
 case "$1" in
     configure)
-        DEFAULT=/etc/default/ovn-host
+        DEFAULT=/etc/default/ovn-controller
         TEMPLATE=/usr/share/ovn/host/default.template
         if ! test -e $DEFAULT; then
             cp $TEMPLATE $DEFAULT

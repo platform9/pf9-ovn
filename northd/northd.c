@@ -8209,7 +8209,7 @@ lport_key_unquoted(const char *key, struct ds *tmp)
  * If multicast snooping is enabled, skip eth.mcast so normal snooping rules
  * control it; otherwise flood mcast too. */
 static void
-add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
+add_l2only_flood_all(struct ovn_port *p, struct lflow_table *lflows)
 {
     if (!p || !p->od || !p->nbsp || !port_is_l2_only_port(p)) {
         return;
@@ -8237,7 +8237,7 @@ add_l2only_flood_all(struct ovn_port *p, struct hmap *lflows)
  * This preserves MAC anti-spoofing while realxing IP/ARP restrictions. 
 */
 static void
-add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, const char* src_mac){
+add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct lflow_table *lflows, const char* src_mac){
     if (!p || !p->od || !p->nbsp) {
         VLOG_DBG("port is null, skipping...");
         return;
@@ -8302,8 +8302,7 @@ add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct hmap *lflows, cons
  * - Keeps stage ordering intact (still runs later stages).
  * - Does not touch infra ports or other VIFs. */
 static void
-add_minimal_portsec_bypass(struct ovn_port *p, struct hmap *lflows) 
-                           
+add_minimal_portsec_bypass(struct ovn_port *p, struct lflow_table *lflows)
 {
     if (!p || !p->od || !p->nbsp) {
         return;
@@ -16289,14 +16288,14 @@ build_lswitch_and_lrouter_flows(
                       op->json_key);
             
             bool allow_forged_mac = smap_get_bool(&op->nbsp->external_ids, "pf9-allow-mac-forged-transmits", false);
-            char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
+            const char *src_mac = smap_get_def(&op->nbsp->external_ids, "pf9-l2port-src-mac", "");
 
             VLOG_DBG("port: %s; src_mac: %s; allow_forged_mac: %s", op->key, src_mac, allow_forged_mac ? "true" : "false");
 
             add_minimal_portsec_bypass(op, lsi.lflows);
             add_l2only_flood_all(op, lsi.lflows);
             if (!allow_forged_mac && src_mac && src_mac[0]) {
-                add_l2only_mac_spoofing_prevention(op, lflows, src_mac);
+                add_l2only_mac_spoofing_prevention(op, lsi.lflows, src_mac);
             }
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());

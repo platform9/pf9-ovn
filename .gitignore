@@ -20,6 +20,7 @@
 *.so
 *.suo
 **/*.sym
+*.rpm
 *~
 *,cover
 .#*
@@ -94,3 +95,4 @@ testsuite.tmp.orig
 /.venv
 /cxx-check
 /*.ovsschema.stamp
+.DS_Store

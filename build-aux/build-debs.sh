@@ -68,14 +68,18 @@ if [ "$UBUNTU_VERSION" = "u24" ]; then
 
 elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
     # Ubuntu 22.04 (Jammy)
-    OVS_BASE="3.3.1"
-    OVN_BASE="24.03.2"
+    OVS_BASE="3.3.6"
+    OVN_BASE="24.03.6"
 
-    # Case 1: On a u24 branch, try to swap 'u24' for 'u22'
+    # Case 1: Already on a u24 branch - No Switch/Fetch needed
     if echo "$CURRENT_BRANCH" | grep -q "u24"; then
-        TARGET_BRANCH="${CURRENT_BRANCH/u24/u22}"
-        echo "Current branch '$CURRENT_BRANCH' contains 'u24'. Fetching..."
-
+        echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
+    
+    # Case 2: On a u22 branch, try to swap 'u22' for 'u24'
+    elif echo "$CURRENT_BRANCH" | grep -q "u22"; then
+        TARGET_BRANCH="${CURRENT_BRANCH/u22/u24}"
+        echo "Current branch '$CURRENT_BRANCH' contains 'u22'. Fetching..."
+        
         # Fetch before switching
         git -C "$ROOT" fetch
 
@@ -83,13 +87,15 @@ elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
         if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
             echo "Successfully switched to specific branch '$TARGET_BRANCH'."
         else
-            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main'."
-            git -C "$ROOT" checkout "main"
+            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main-u24'."
+            git -C "$ROOT" checkout "main-u24"
         fi
     
-    # Case 2: Already on u22 or generic branch -> Keep it.
+    # Case 3: Generic branch (no u22/u24 in name) -> Default to main-u24
     else
-        echo "Current branch '$CURRENT_BRANCH' is appropriate for u22. Keeping it."
+        echo "Current branch '$CURRENT_BRANCH' does not match u24 patterns. Fetching and defaulting to 'main-u24'."
+        git -C "$ROOT" fetch
+        git -C "$ROOT" checkout "main-u24"
     fi
 
 else
@@ -110,23 +116,23 @@ if [ "$UBUNTU_VERSION" = "u22" ]; then
 fi
 
 # Update OVN files
-sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/debian/changelog"
-sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/configure.ac"
+sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/changelog"
+sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/configure.ac"
 
 # --- OVS CONFIGURATION ---
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
-if [ "$UBUNTU_VERSION" = "u22" ]; then
-  printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
-fi
-
-# Update OVS Changelog
-sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/ovs/debian/changelog"
-
-# Python setuptools sanitization (Pep 440)
-PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
-
-# Replace the base version in configure.ac
-sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION.$UBUNTU_VERSION/g" "$ROOT/ovs/configure.ac"
+#PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
+#if [ "$UBUNTU_VERSION" = "u22" ]; then
+#  printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+#fi
+#
+## Update OVS Changelog
+#sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
+#
+## Python setuptools sanitization (Pep 440)
+#PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+#
+## Replace the base version in configure.ac
+#sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
 
 
 # --- BUILD OVS ---

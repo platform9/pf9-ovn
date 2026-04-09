@@ -32,70 +32,14 @@ rm -rf "$ROOT/dist"
 # ... [Previous setup and make distclean] ...
 
 UBUNTU_VERSION=$1
-CURRENT_BRANCH=$(git -C "$ROOT" rev-parse --abbrev-ref HEAD)
 
-if [ "$UBUNTU_VERSION" = "u24" ]; then
-    # Ubuntu 24.04 (Noble)
-    OVS_BASE="3.3.6"
-    OVN_BASE="24.03.6"
-
-    # Case 1: Already on a u24 branch - No Switch/Fetch needed
-    if echo "$CURRENT_BRANCH" | grep -q "u24"; then
-        echo "Current branch '$CURRENT_BRANCH' is already a u24 branch. Keeping it."
-    
-    # Case 2: On a u22 branch, try to swap 'u22' for 'u24'
-    elif echo "$CURRENT_BRANCH" | grep -q "u22"; then
-        TARGET_BRANCH="${CURRENT_BRANCH/u22/u24}"
-        echo "Current branch '$CURRENT_BRANCH' contains 'u22'. Fetching..."
-        
-        # Fetch before switching
-        git -C "$ROOT" fetch
-
-        echo "Attempting switch to '$TARGET_BRANCH'..."
-        if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
-            echo "Successfully switched to specific branch '$TARGET_BRANCH'."
-        else
-            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main-u24'."
-            git -C "$ROOT" checkout "main-u24"
-        fi
-    
-    # Case 3: Generic branch (no u22/u24 in name) -> Default to main-u24
-    else
-        echo "Current branch '$CURRENT_BRANCH' does not match u24 patterns. Fetching and defaulting to 'main-u24'."
-        git -C "$ROOT" fetch
-        git -C "$ROOT" checkout "main-u24"
-    fi
-
-elif [ "$UBUNTU_VERSION" = "u22" ] || [ -z "$UBUNTU_VERSION" ]; then
-    # Ubuntu 22.04 (Jammy)
-    OVS_BASE="3.3.1"
-    OVN_BASE="24.03.2"
-
-    # Case 1: On a u24 branch, try to swap 'u24' for 'u22'
-    if echo "$CURRENT_BRANCH" | grep -q "u24"; then
-        TARGET_BRANCH="${CURRENT_BRANCH/u24/u22}"
-        echo "Current branch '$CURRENT_BRANCH' contains 'u24'. Fetching..."
-
-        # Fetch before switching
-        git -C "$ROOT" fetch
-
-        echo "Attempting switch to '$TARGET_BRANCH'..."
-        if git -C "$ROOT" checkout "$TARGET_BRANCH"; then
-            echo "Successfully switched to specific branch '$TARGET_BRANCH'."
-        else
-            echo "Branch '$TARGET_BRANCH' not found. Defaulting to 'main'."
-            git -C "$ROOT" checkout "main"
-        fi
-    
-    # Case 2: Already on u22 or generic branch -> Keep it.
-    else
-        echo "Current branch '$CURRENT_BRANCH' is appropriate for u22. Keeping it."
-    fi
-
-else
+if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UBUNTU_VERSION" ]; then
     echo "Error: Invalid Ubuntu version '$UBUNTU_VERSION'. Expected 'u22' or 'u24'."
     exit 1
 fi
+
+OVS_BASE="3.3.6"
+OVN_BASE="24.03.6"
 
 # ... [Submodule update and build logic below] ...
 
@@ -105,9 +49,7 @@ git -C "$ROOT" submodule update --init --recursive
 
 # --- OVN CONFIGURATION ---
 PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
-if [ "$UBUNTU_VERSION" = "u22" ]; then
-  printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
-fi
+printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # Update OVN files
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/debian/changelog"
@@ -118,9 +60,7 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION+$UBUNTU_VERSION/g" "$
 # Epoch 1 beats upstream; omitting build counter means existing CI-versioned
 # installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
 PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9
-if [ "$UBUNTU_VERSION" = "u22" ]; then
-  printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
-fi
+printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # Update OVS Changelog
 sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION+$UBUNTU_VERSION/g" "$ROOT/ovs/debian/changelog"
@@ -182,9 +122,6 @@ git clean -fdx
 cd "$ROOT/ovs"
 git reset HEAD --hard
 git clean -fdx
-
-# Restore original branch to keep CI agent clean
-git -C "$ROOT" checkout "${CURRENT_BRANCH}"
 
 cd "$ARTIFACT_DIR"
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

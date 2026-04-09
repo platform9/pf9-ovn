@@ -1,10 +1,8 @@
 set -x
-set -e # Recommended: Fail immediately if any command fails
+set -e
 
 source pf9-version/pf9-version.rc
-
-TEAMCITY_ROOT="$(pwd)"
-ROOT="$(pwd)/pf9-ovn"
+source "$(dirname "$0")/build-common.sh"
 
 # Install dependencies
 apt-get update
@@ -17,19 +15,11 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
   libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
 
-# export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
-
-git config --global --add safe.directory '*'
-git config --global url."https://github.com/".insteadOf "git@github.com:"
-
-# Cleanup: Remove previous build artifacts and the dist directory
-# We run make distclean in ROOT if Makefile exists, otherwise just clean dist
+# Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
     make -C "$ROOT" distclean
 fi
 rm -rf "$ROOT/dist"
-
-# ... [Previous setup and make distclean] ...
 
 UBUNTU_VERSION=$1
 
@@ -38,14 +28,7 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
     exit 1
 fi
 
-OVS_BASE="3.3.6"
-OVN_BASE="24.03.6"
-
-# ... [Submodule update and build logic below] ...
-
-# 2. Initialize and update submodules recursively
-# Performed after branch switching to ensure correct submodules are pulled
-git -C "$ROOT" submodule update --init --recursive
+pf9_submodule_update
 
 # --- OVN CONFIGURATION ---
 PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
@@ -115,13 +98,7 @@ mv -v ../*.deb "$ARTIFACT_DIR"
 
 
 # --- CLEANUP ---
-cd "$ROOT"
-git reset HEAD --hard
-git clean -fdx
-
-cd "$ROOT/ovs"
-git reset HEAD --hard
-git clean -fdx
+pf9_build_reset
 
 cd "$ARTIFACT_DIR"
 dpkg-scanpackages . /dev/null | gzip -9c > Packages.gz

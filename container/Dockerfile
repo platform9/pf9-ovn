@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y -qq --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy built packages from the build context
-COPY pkgs/u22/*.deb /tmp/pkgs/
+COPY pkgs/u24/*.deb /tmp/pkgs/
 
 RUN apt-get update \
 && dpkg -i /tmp/pkgs/*.deb || true \

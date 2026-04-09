@@ -18,6 +18,8 @@ dnf install -y \
   libevent-devel json-c-devel libunwind-devel \
   desktop-file-utils libbpf-devel libxdp-devel
 
+pf9_git_setup
+
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
     make -C "$ROOT" distclean

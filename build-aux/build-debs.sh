@@ -15,6 +15,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
   libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
 
+pf9_git_setup
+
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
     make -C "$ROOT" distclean

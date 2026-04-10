@@ -96,3 +96,4 @@ testsuite.tmp.orig
 /cxx-check
 /*.ovsschema.stamp
 .DS_Store
+*.deb

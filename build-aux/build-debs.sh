@@ -87,16 +87,27 @@ export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
+# Remove bloat packages before artifact collection
+find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \
+    \( -name "*-doc_*" -o -name "*-source_*" -o -name "*-test_*" \
+       -o -name "*-testcontroller_*" -o -name "*-dbgsym_*" \) \
+    -delete -print
+
 # --- ARTIFACT COLLECTION ---
 ARTIFACT_DIR="$TEAMCITY_ROOT/pkgs/$UBUNTU_VERSION"
 mkdir -p "$ARTIFACT_DIR"
 
-# Move OVS debs (from ROOT)
-mv -v "$ROOT"/*.deb "$ARTIFACT_DIR"
+# Move OVS debs (exclude doc/source/test/dbgsym)
+find "$ROOT" -maxdepth 1 -name "*.deb" \
+    ! -name "*-doc_*" ! -name "*-source_*" \
+    ! -name "*-test_*" ! -name "*-testcontroller_*" ! -name "*-dbgsym_*" \
+    -exec mv -v {} "$ARTIFACT_DIR" \;
 
-# Move OVN debs (from ROOT/../)
-# Since we are in ROOT, we use ../
-mv -v ../*.deb "$ARTIFACT_DIR"
+# Move OVN debs (from ROOT/../, exclude doc/source/test/dbgsym)
+find "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \
+    ! -name "*-doc_*" ! -name "*-source_*" \
+    ! -name "*-test_*" ! -name "*-testcontroller_*" ! -name "*-dbgsym_*" \
+    -exec mv -v {} "$ARTIFACT_DIR" \;
 
 
 # --- CLEANUP ---

@@ -75,15 +75,24 @@ export OVSDIR OVSBUILDDIR OVSVERSION=${OVS_BASE}
 
 make rpm-fedora RPMBUILD_OPT="--without check"
 
+# Remove bloat packages before artifact collection
+find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
+    \( -name "*-debuginfo-*" -o -name "*-debugsource-*" -o -name "*-devel-*" \) \
+    -delete -print
+
 # --- ARTIFACT COLLECTION ---
 ARTIFACT_DIR="$TEAMCITY_ROOT/pkgs/$ROCKY_VERSION"
 mkdir -p "$ARTIFACT_DIR"
 
-# Collect OVS RPMs
-find "$ROOT/ovs/rpm/rpmbuild/RPMS" -name "*.rpm" -exec cp -v {} "$ARTIFACT_DIR" \;
+# Collect OVS RPMs (exclude debug/source/devel)
+find "$ROOT/ovs/rpm/rpmbuild/RPMS" -name "*.rpm" \
+    ! -name "*-debuginfo-*" ! -name "*-debugsource-*" ! -name "*-devel-*" \
+    -exec cp -v {} "$ARTIFACT_DIR" \;
 
-# Collect OVN RPMs
-find "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" -exec cp -v {} "$ARTIFACT_DIR" \;
+# Collect OVN RPMs (exclude debug/source/devel)
+find "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
+    ! -name "*-debuginfo-*" ! -name "*-debugsource-*" ! -name "*-devel-*" \
+    -exec cp -v {} "$ARTIFACT_DIR" \;
 
 ls -lh "$ARTIFACT_DIR"
 

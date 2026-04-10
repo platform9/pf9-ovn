@@ -38,7 +38,7 @@ pf9_submodule_update
 # --- OVN CONFIGURATION ---
 # RPM Version field does not allow hyphens; use dots throughout
 PF9_OVN_BUILD_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}.${ROCKY_VERSION}
-printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+printf '%s\n' "1:$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # Update OVN configure.ac
 sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure.ac"
@@ -46,7 +46,7 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes
 PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${ROCKY_VERSION}
-printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
+printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # Update OVS configure.ac
 sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"

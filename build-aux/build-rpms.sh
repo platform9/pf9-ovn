@@ -37,8 +37,11 @@ pf9_submodule_update
 
 # --- OVN CONFIGURATION ---
 # RPM Version field does not allow hyphens; use dots throughout
-PF9_OVN_BUILD_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}.${ROCKY_VERSION}
+PF9_OVN_BUILD_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
 printf '%s\n' "1:$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+
+# add the rocky version after writing to the file
+PF9_OVN_BUILD_VERSION=${PF9_OVN_BUILD_VERSION}.${ROCKY_VERSION}
 
 # Update OVN configure.ac
 sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure.ac"

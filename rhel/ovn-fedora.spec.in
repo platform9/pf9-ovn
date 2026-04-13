@@ -172,7 +172,7 @@ for service in ovn-controller-vtep ovn-northd ovn-ic ovn-ic-db ovn-db@; do
                         $RPM_BUILD_ROOT%{_unitdir}/${service}.service
 done
 install -p -D -m 0644 \
-                rhel/usr_lib_systemd_system_ovn-controller.service \
+                rhel/usr_lib_systemd_system_ovn-host.service \
                 $RPM_BUILD_ROOT%{_unitdir}/ovn-host.service
 
 rm -rf $RPM_BUILD_ROOT/%{_datadir}/openvswitch/python/

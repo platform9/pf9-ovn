@@ -41,14 +41,14 @@ PF9_OVN_BUILD_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
 printf '%s\n' "1:$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # add the rocky version after writing to the file
-PF9_OVN_BUILD_VERSION=${PF9_OVN_BUILD_VERSION}.${ROCKY_VERSION}
+PF9_OVN_BUILD_VERSION=${PF9_OVN_BUILD_VERSION}
 
 # Update OVN configure.ac
 sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure.ac"
 
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes
-PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${ROCKY_VERSION}
+PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
 printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # Update OVS configure.ac

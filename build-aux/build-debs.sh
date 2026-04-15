@@ -34,7 +34,7 @@ pf9_submodule_update
 
 # --- OVN CONFIGURATION ---
 PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
-printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
+printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -47,7 +47,7 @@ pf9_patch_ovn_binary_version
 # Epoch 1 beats upstream; omitting build counter means existing CI-versioned
 # installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
 PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
-printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # Update OVS Changelog
 sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"

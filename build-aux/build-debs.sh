@@ -33,29 +33,29 @@ fi
 pf9_submodule_update
 
 # --- OVN CONFIGURATION ---
-PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER
+PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
 printf '%s\n' "$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
-# Update OVN files
+# debian/changelog gets the full epoch-prefixed version for apt dependency resolution
+# configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/changelog"
-sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/configure.ac"
+
+pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes.
 # Epoch 1 beats upstream; omitting build counter means existing CI-versioned
 # installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9
+PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
 printf '%s' "$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # Update OVS Changelog
 sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
 
-# Python setuptools sanitization (Pep 440)
-PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
-
-# Replace the base version in configure.ac
+# Python setuptools sanitization (PEP 440)
+# Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
+PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
 sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
-
 
 # --- BUILD OVS ---
 # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.

@@ -37,14 +37,11 @@ pf9_submodule_update
 
 # --- OVN CONFIGURATION ---
 # RPM Version field does not allow hyphens; use dots throughout
-PF9_OVN_BUILD_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
-printf '%s\n' "1:$PF9_OVN_BUILD_VERSION" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+printf '%s\n' "1:${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
 
-# add the rocky version after writing to the file
-PF9_OVN_BUILD_VERSION=${PF9_OVN_BUILD_VERSION}
-
-# Update OVN configure.ac
-sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BUILD_VERSION}/g" "$ROOT/configure.ac"
+# configure.ac gets the dot-separated binary version (no OS suffix)
+# RPM package OS indicator comes from %{?dist} macro automatically (e.g. .el10)
+pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes

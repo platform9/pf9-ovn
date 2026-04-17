@@ -29,6 +29,7 @@ Name: ovn
 Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
+Epoch: 1
 Version: @VERSION@
 Obsoletes: openvswitch-ovn-common < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
@@ -82,7 +83,7 @@ Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
 Requires: firewalld-filesystem
-Obsoletes: openvswitch-ovn-central
+Obsoletes: openvswitch-ovn-central < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-central = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description central
@@ -93,7 +94,7 @@ Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
 Requires: firewalld-filesystem
-Obsoletes: openvswitch-ovn-host
+Obsoletes: openvswitch-ovn-host < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-host = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description host
@@ -103,7 +104,7 @@ OVN controller running on each host.
 Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn
-Obsoletes: openvswitch-ovn-vtep
+Obsoletes: openvswitch-ovn-vtep < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-vtep = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description vtep
@@ -113,7 +114,7 @@ OVN vtep controller
 Summary: Open Virtual Network support
 License: ASL 2.0
 Requires: ovn python3-openvswitch
-Obsoletes: openvswitch-ovn-docker
+Obsoletes: openvswitch-ovn-docker < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-docker = %{?epoch:%{epoch}:}%{version}-%{release}
 
 %description docker
@@ -165,11 +166,14 @@ install -p -D -m 0644 \
         rhel/usr_share_ovn_scripts_systemd_sysconfig.template \
         $RPM_BUILD_ROOT/%{_sysconfdir}/sysconfig/ovn
 
-for service in ovn-controller ovn-controller-vtep ovn-northd ovn-ic ovn-ic-db ovn-db@; do
+for service in ovn-controller-vtep ovn-northd ovn-ic ovn-ic-db ovn-db@; do
         install -p -D -m 0644 \
                         rhel/usr_lib_systemd_system_${service}.service \
                         $RPM_BUILD_ROOT%{_unitdir}/${service}.service
 done
+install -p -D -m 0644 \
+                rhel/usr_lib_systemd_system_ovn-host.service \
+                $RPM_BUILD_ROOT%{_unitdir}/ovn-host.service
 
 rm -rf $RPM_BUILD_ROOT/%{_datadir}/openvswitch/python/
 
@@ -240,14 +244,14 @@ fi
 %pre host
 if [ $1 -eq 1 ] ; then
     # Package install.
-    /bin/systemctl status ovn-controller.service &>/dev/null
+    /bin/systemctl status ovn-host.service &>/dev/null
     ovn_status=$?
     rpm -ql openvswitch-ovn-host > /dev/null
     if [[ "$?" = "0" && "$ovn_status" = "0" ]]; then
-        # ovn-controller service is running which means old
+        # ovn-host service is running which means old
         # openvswitch-ovn-host is installed and it will be cleaned up. So
-        # start ovn-controller service when posttrans host is called.
-        touch %{_localstatedir}/lib/rpm-state/ovn-controller
+        # start ovn-host service when posttrans host is called.
+        touch %{_localstatedir}/lib/rpm-state/ovn-host
     fi
 fi
 
@@ -309,12 +313,12 @@ fi
 
 %preun host
 %if 0%{?systemd_preun:1}
-    %systemd_preun ovn-controller.service
+    %systemd_preun ovn-host.service
 %else
     if [ $1 -eq 0 ] ; then
         # Package removal, not upgrade
-        /bin/systemctl --no-reload disable ovn-controller.service >/dev/null 2>&1 || :
-        /bin/systemctl stop ovn-controller.service >/dev/null 2>&1 || :
+        /bin/systemctl --no-reload disable ovn-host.service >/dev/null 2>&1 || :
+        /bin/systemctl stop ovn-host.service >/dev/null 2>&1 || :
     fi
 %endif
 
@@ -378,7 +382,7 @@ fi
 
 %post host
 %if 0%{?systemd_post:1}
-    %systemd_post ovn-controller.service
+    %systemd_post ovn-host.service
 %else
     # Package install, not upgrade
     if [ $1 -eq 1 ]; then
@@ -438,11 +442,11 @@ if [ "$1" -ge "1" ] ; then
     # ovn-controller upgrade.
     # Ideally this would be held by systemd, but it's impossible
     # to pass custom restart command to systemd service.
-    systemctl -q is-active ovn-controller
+    systemctl -q is-active ovn-host
     if [ "$?" -eq 0 ] ; then
-        # ovn-controller was running prior to upgrade, so do a graceful restart
+        # ovn-host was running prior to upgrade, so do a graceful restart
         %{_datadir}/ovn/scripts/ovn-ctl stop_controller --restart >/dev/null 2>&1 || :
-        /bin/systemctl restart ovn-controller.service >/dev/null 2>&1 || :
+        /bin/systemctl restart ovn-host.service >/dev/null 2>&1 || :
     fi
 fi
 
@@ -470,9 +474,9 @@ fi
 %posttrans host
 if [ $1 -eq 1 ]; then
     # Package install, not upgrade
-    if [ -e %{_localstatedir}/lib/rpm-state/ovn-controller ]; then
-        rm %{_localstatedir}/lib/rpm-state/ovn-controller
-        /bin/systemctl start ovn-controller.service >/dev/null 2>&1 || :
+    if [ -e %{_localstatedir}/lib/rpm-state/ovn-host ]; then
+        rm %{_localstatedir}/lib/rpm-state/ovn-host
+        /bin/systemctl start ovn-host.service >/dev/null 2>&1 || :
     fi
 fi
 
@@ -541,7 +545,7 @@ fi
 %files host
 %{_bindir}/ovn-controller
 %{_mandir}/man8/ovn-controller.8*
-%{_unitdir}/ovn-controller.service
+%{_unitdir}/ovn-host.service
 %{_prefix}/lib/firewalld/services/ovn-host-firewall-service.xml
 
 %files vtep

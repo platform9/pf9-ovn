@@ -1,0 +1,16 @@
+# this service replaces ovn-controller service from the upstream build in the custom pf9 OVN build
+[Unit]
+Description=OVN controller daemon
+After=network.target
+Requires=openvswitch.service
+After=openvswitch.service
+
+[Service]
+Type=forking
+Restart=on-failure
+EnvironmentFile=-/etc/sysconfig/ovn-host
+ExecStart=/usr/share/ovn/scripts/ovn-ctl --no-monitor --ovn-manage-ovsdb=no start_controller $OVN_CTL_OPTS
+ExecStop=/usr/share/ovn/scripts/ovn-ctl stop_controller --no-monitor
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/-",
+    "value": {
+      "name": "flow-watchdog",
+      "image": "REPLACE_WITH_OVN_IMAGE",
+      "command": ["/usr/local/bin/flow-watchdog.sh"],
+      "env": [
+        {"name": "SNAPSHOT_DIR",              "value": "/flow-snapshots"},
+        {"name": "FLOW_THRESHOLD",            "value": "10"},
+        {"name": "FLOW_RECONCILED_THRESHOLD", "value": "200"},
+        {"name": "POLL_INTERVAL_SEC",         "value": "0.05"}
+      ],
+      "securityContext": {
+        "privileged": true
+      },
+      "resources": {
+        "requests": {"cpu": "10m",  "memory": "16Mi"},
+        "limits":   {"cpu": "50m",  "memory": "32Mi"}
+      },
+      "volumeMounts": [
+        {"name": "ovn-flow-snapshots", "mountPath": "/flow-snapshots"},
+        {"name": "ovs-run",            "mountPath": "/var/run/openvswitch"}
+      ]
+    }
+  }
+]

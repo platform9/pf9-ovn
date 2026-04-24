@@ -23,7 +23,8 @@ RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/s
   && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
  
 COPY  ovn-kube-util /usr/bin/
-
+COPY  flow-watchdog.sh /usr/local/bin/flow-watchdog.sh
+RUN   chmod +x /usr/local/bin/flow-watchdog.sh
 
 RUN install -d -m 0755 /var/lib/ovn /var/log/ovn /etc/ovn
 

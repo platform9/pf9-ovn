@@ -1,0 +1,35 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/lifecycle",
+    "value": {
+      "preStop": {
+        "exec": {
+          "command": [
+            "/bin/sh", "-c",
+            "ovs-ofctl dump-flows br-int --no-names > /flow-snapshots/br-int.flows.tmp && ovs-ofctl dump-groups br-int > /flow-snapshots/br-int.groups.tmp && mv /flow-snapshots/br-int.flows.tmp /flow-snapshots/br-int.flows && mv /flow-snapshots/br-int.groups.tmp /flow-snapshots/br-int.groups || true"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/containers/0/volumeMounts/-",
+    "value": {
+      "name": "ovn-flow-snapshots",
+      "mountPath": "/flow-snapshots"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/template/spec/volumes/-",
+    "value": {
+      "name": "ovn-flow-snapshots",
+      "hostPath": {
+        "path": "/var/lib/ovn/flow-snapshots",
+        "type": "DirectoryOrCreate"
+      }
+    }
+  }
+]

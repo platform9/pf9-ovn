@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""
+Mock kubectl for unit testing upgrade_orchestrator.py.
+Behaviour controlled by MOCK_KUBECTL_SCENARIO env var:
+  healthy    - all pods healthy, all chassis registered  (default)
+  low_flows  - flow count below threshold after restart
+  pod_stuck  - pods never reach Ready
+"""
+import sys, os, json
+
+scenario = os.environ.get("MOCK_KUBECTL_SCENARIO", "healthy")
+args = sys.argv[1:]
+
+def make_pods(count=3, ready=True):
+    return {"items": [
+        {"metadata": {"name": f"ovn-controller-node{i}", "namespace": "pf9-infra"},
+         "spec": {"nodeName": f"node{i}"},
+         "status": {"conditions": [{"type": "Ready", "status": "True" if ready else "False"}]}}
+        for i in range(count)
+    ]}
+
+cmd = " ".join(args)
+
+if "get" in args and "pods" in args and "-o" in args and "json" in args:
+    print(json.dumps(make_pods(ready=(scenario != "pod_stuck"))))
+
+elif "get" in args and "pod" in args and "jsonpath" in cmd:
+    # Ready status check
+    status = "False" if scenario == "pod_stuck" else "True"
+    print(status)
+
+elif "delete" in args and "pod" in args:
+    pod = next((a for a in args if a.startswith("ovn-controller")), "unknown")
+    print(f'pod "{pod}" deleted')
+
+elif "exec" in args:
+    if "ovs-ofctl" in cmd:
+        count = "5" if scenario == "low_flows" else "1500"
+        print(count)
+    elif "ovn-sbctl" in cmd:
+        if scenario == "healthy":
+            print("chassis=node0\nchassis=node1\nchassis=node2")
+        else:
+            print("")

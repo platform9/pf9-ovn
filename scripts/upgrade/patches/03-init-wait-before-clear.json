@@ -1,0 +1,25 @@
+[
+  {
+    "op": "add",
+    "path": "/spec/template/spec/initContainers",
+    "value": [
+      {
+        "name": "configure-ovs-wait-before-clear",
+        "image": "REPLACE_WITH_OVN_IMAGE",
+        "command": [
+          "/bin/sh", "-c",
+          "ovs-vsctl set open . external_ids:ovn-ofctrl-wait-before-clear=30000 && echo 'wait-before-clear set to 30000ms'"
+        ],
+        "securityContext": {
+          "privileged": true
+        },
+        "volumeMounts": [
+          {
+            "name": "ovs-run",
+            "mountPath": "/var/run/openvswitch"
+          }
+        ]
+      }
+    ]
+  }
+]

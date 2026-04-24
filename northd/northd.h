@@ -571,6 +571,7 @@ struct ovn_port {
 
     struct lport_addresses *ps_addrs;   /* Port security addresses. */
     unsigned int n_ps_addrs;
+    bool has_winnlb_ps_pair;
 
     bool lsp_can_be_inc_processed; /* If it can be incrementally processed when
                                       the port changes. */

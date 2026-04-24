@@ -2038,6 +2038,12 @@ parse_lsp_addrs(struct ovn_port *op)
                               op->nbsp->port_security[j]);
             continue;
         }
+        if (op->ps_addrs[op->n_ps_addrs].ea.ea[0] == 0x03 &&
+            op->ps_addrs[op->n_ps_addrs].ea.ea[1] == 0xbf &&
+            (op->ps_addrs[op->n_ps_addrs].n_ipv4_addrs ||
+             op->ps_addrs[op->n_ps_addrs].n_ipv6_addrs)) {
+            op->has_winnlb_ps_pair = true;
+        }
         op->n_ps_addrs++;
     }
 }
@@ -5705,6 +5711,31 @@ build_lswitch_port_sec_op(struct ovn_port *op, struct lflow_table *lflows,
     const char *queue_id = smap_get(&op->sb->options, "qdisc_queue_id");
     if (queue_id) {
         ds_put_format(actions, "set_queue(%s); ", queue_id);
+    }
+
+    if (op->has_winnlb_ps_pair) {
+        ds_clear(match);
+        ds_put_format(match,
+                      "inport == %s && "
+                      "eth.src == 03:bf:00:00:00:00/ff:ff:00:00:00:00",
+                      op->json_key);
+        ds_clear(actions);
+        if (lsp_is_vtep(op->nbsp)) {
+            ds_put_format(actions, REGBIT_FROM_RAMP" = 1; ");
+            ds_put_format(actions, "next(pipeline=ingress, table=%d);",
+                          ovn_stage_get_table(S_SWITCH_IN_HAIRPIN));
+        } else {
+            if (queue_id) {
+                ds_put_format(actions, "set_queue(%s); ", queue_id);
+            }
+            ds_put_cstr(actions,
+                        REGBIT_PORT_SEC_DROP" = check_in_port_sec(); next;");
+        }
+        ovn_lflow_add_with_lport_and_hint(lflows, op->od,
+                                          S_SWITCH_IN_CHECK_PORT_SEC, 105,
+                                          ds_cstr(match), ds_cstr(actions),
+                                          op->key, &op->nbsp->header_,
+                                          op->lflow_ref);
     }
 
     if (lsp_is_vtep(op->nbsp)) {

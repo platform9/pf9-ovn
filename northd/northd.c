@@ -1235,6 +1235,7 @@ ovn_port_cleanup(struct ovn_port *port)
     free(port->ps_addrs);
     port->ps_addrs = NULL;
     port->n_ps_addrs = 0;
+    port->has_winnlb_ps_pair = false;
 
     destroy_lport_addresses(&port->lrp_networks);
     destroy_lport_addresses(&port->proxy_arp_addrs);

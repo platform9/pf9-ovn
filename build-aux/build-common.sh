@@ -4,8 +4,8 @@
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
-OVS_BASE="3.3.6"
-OVN_BASE="24.03.6"
+OVS_BASE="3.6.2"
+OVN_BASE="25.09.3"
 
 pf9_git_setup() {
     git config --global --add safe.directory '*'

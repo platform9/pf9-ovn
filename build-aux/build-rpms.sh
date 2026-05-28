@@ -16,7 +16,7 @@ dnf install -y \
   unbound unbound-devel procps-ng bzip2 git createrepo_c \
   libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
   libevent-devel json-c-devel libunwind-devel \
-  desktop-file-utils libbpf-devel libxdp-devel
+  desktop-file-utils libbpf-devel libxdp-devel systemtap-sdt-devel
 
 pf9_git_setup
 

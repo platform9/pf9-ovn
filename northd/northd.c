@@ -1201,6 +1201,7 @@ ovn_port_create(struct hmap *ports, const char *key,
 
     op->key = xstrdup(key);
     op->sb = sb;
+    sset_init(&op->winnlb_vips);
     ovn_port_set_nb(op, nbsp, nbrp);
     op->primary_port = op->cr_port = NULL;
     hmap_insert(ports, &op->key_node, hash_string(op->key, 0));
@@ -1236,6 +1237,7 @@ ovn_port_cleanup(struct ovn_port *port)
     port->ps_addrs = NULL;
     port->n_ps_addrs = 0;
     port->has_winnlb_ps_pair = false;
+    sset_clear(&port->winnlb_vips);
 
     destroy_lport_addresses(&port->lrp_networks);
     destroy_lport_addresses(&port->proxy_arp_addrs);
@@ -1249,6 +1251,7 @@ ovn_port_destroy_orphan(struct ovn_port *port)
     free(port->key);
     lflow_ref_destroy(port->lflow_ref);
     lflow_ref_destroy(port->stateful_lflow_ref);
+    sset_destroy(&port->winnlb_vips);
 
     free(port);
 }
@@ -2082,9 +2085,38 @@ parse_lsp_addrs(struct ovn_port *op)
             (op->ps_addrs[op->n_ps_addrs].n_ipv4_addrs ||
              op->ps_addrs[op->n_ps_addrs].n_ipv6_addrs)) {
             op->has_winnlb_ps_pair = true;
+            for (size_t k = 0;
+                 k < op->ps_addrs[op->n_ps_addrs].n_ipv4_addrs;
+                 k++) {
+                sset_add(&op->winnlb_vips,
+                         op->ps_addrs[op->n_ps_addrs]
+                         .ipv4_addrs[k].addr_s);
+            }
         }
         op->n_ps_addrs++;
     }
+}
+
+static bool
+lsp_port_security_has_winnlb_pair(const struct nbrec_logical_switch_port *nbsp)
+{
+    for (size_t i = 0; i < nbsp->n_port_security; i++) {
+        struct lport_addresses ps;
+
+        if (!extract_lsp_addresses(nbsp->port_security[i], &ps)) {
+            continue;
+        }
+
+        bool has_winnlb_pair = ps.ea.ea[0] == 0x03 &&
+                               ps.ea.ea[1] == 0xbf &&
+                               (ps.n_ipv4_addrs || ps.n_ipv6_addrs);
+        destroy_lport_addresses(&ps);
+        if (has_winnlb_pair) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 static struct ovn_port *
@@ -4651,6 +4683,9 @@ ls_handle_lsp_changes(struct ovsdb_idl_txn *ovnsb_idl_txn,
             if (!lsp_can_be_inc_processed(new_nbsp)) {
                 goto fail;
             }
+            if (lsp_port_security_has_winnlb_pair(new_nbsp)) {
+                goto fail;
+            }
             op = ls_port_create(ovnsb_idl_txn, &nd->ls_ports,
                                 new_nbsp->name, new_nbsp, od,
                                 ni->sbrec_mirror_table,
@@ -4673,6 +4708,10 @@ ls_handle_lsp_changes(struct ovsdb_idl_txn *ovnsb_idl_txn,
             if (sset_contains(&nd->svc_monitor_lsps, new_nbsp->name)) {
                 /* This port is used for svc monitor, which may be impacted
                  * by this change. Fallback to recompute. */
+                goto fail;
+            }
+            if (op->has_winnlb_ps_pair ||
+                lsp_port_security_has_winnlb_pair(new_nbsp)) {
                 goto fail;
             }
             if (!check_lsp_is_up &&
@@ -4716,6 +4755,9 @@ ls_handle_lsp_changes(struct ovsdb_idl_txn *ovnsb_idl_txn,
             if (sset_contains(&nd->svc_monitor_lsps, op->key)) {
                 /* This port was used for svc monitor, which may be
                  * impacted by this deletion. Fallback to recompute. */
+                goto fail;
+            }
+            if (op->has_winnlb_ps_pair) {
                 goto fail;
             }
             add_op_to_northd_tracked_ports(&trk_lsps->deleted, op);
@@ -5895,6 +5937,13 @@ build_lswitch_port_sec_op(struct ovn_port *op, struct lflow_table *lflows,
                                           ds_cstr(match), ds_cstr(actions),
                                           op->key, &op->nbsp->header_,
                                           op->lflow_ref);
+    }
+
+    ds_clear(match);
+    ds_put_format(match, "inport == %s", op->json_key);
+    ds_clear(actions);
+    if (queue_id) {
+        ds_put_format(actions, "set_queue(%s); ", queue_id);
     }
 
     if (lsp_is_vtep(op->nbsp)) {
@@ -9227,6 +9276,21 @@ build_lswitch_arp_nd_responder_skip_local(struct ovn_port *op,
                                       &op->nbsp->header_, op->lflow_ref);
 }
 
+static bool
+ls_has_winnlb_vip(const struct hmap *ls_ports,
+                  const struct ovn_datapath *od,
+                  const char *ip)
+{
+    struct ovn_port *op;
+
+    HMAP_FOR_EACH (op, key_node, ls_ports) {
+        if (op->od == od && sset_contains(&op->winnlb_vips, ip)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Ingress table 19: ARP/ND responder, reply for known IPs.
  * (priority 50). */
 static void
@@ -9344,9 +9408,15 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
 
         for (size_t i = 0; i < op->n_lsp_addrs; i++) {
             for (size_t j = 0; j < op->lsp_addrs[i].n_ipv4_addrs; j++) {
+                const char *ip_s = op->lsp_addrs[i].ipv4_addrs[j].addr_s;
+
+                if (ls_has_winnlb_vip(ls_ports, op->od, ip_s)) {
+                    continue;
+                }
+
                 ds_clear(match);
                 ds_put_format(match, "arp.tpa == %s && arp.op == 1",
-                            op->lsp_addrs[i].ipv4_addrs[j].addr_s);
+                              ip_s);
                 ds_clear(actions);
                 ds_put_format(actions,
                     "eth.dst = eth.src; "
@@ -17033,6 +17103,45 @@ lflow_reset_northd_refs(struct lflow_input *lflow_input)
     }
 }
 
+static void
+add_winnlb_affected_lsp_flows(struct tracked_ovn_ports *trk_lsps)
+{
+    struct hmapx affected = HMAPX_INITIALIZER(&affected);
+    struct hmapx *changed_ports[] = {
+        &trk_lsps->deleted,
+        &trk_lsps->updated,
+        &trk_lsps->created,
+    };
+
+    for (size_t i = 0; i < ARRAY_SIZE(changed_ports); i++) {
+        struct hmapx_node *hmapx_node;
+
+        HMAPX_FOR_EACH (hmapx_node, changed_ports[i]) {
+            struct ovn_port *op = hmapx_node->data;
+
+            if (!op->nbsp || !op->has_winnlb_ps_pair || !op->od) {
+                continue;
+            }
+
+            struct ovn_port *ls_op;
+            HMAP_FOR_EACH (ls_op, dp_node, &op->od->ports) {
+                if (!ls_op->nbsp || ls_op == op ||
+                    hmapx_contains(&trk_lsps->deleted, ls_op) ||
+                    hmapx_contains(&trk_lsps->created, ls_op)) {
+                    continue;
+                }
+                hmapx_add(&affected, ls_op);
+            }
+        }
+    }
+
+    struct hmapx_node *hmapx_node;
+    HMAPX_FOR_EACH (hmapx_node, &affected) {
+        hmapx_add(&trk_lsps->updated, hmapx_node->data);
+    }
+    hmapx_destroy(&affected);
+}
+
 bool
 lflow_handle_northd_port_changes(struct ovsdb_idl_txn *ovnsb_txn,
                                  struct tracked_ovn_ports *trk_lsps,
@@ -17041,6 +17150,8 @@ lflow_handle_northd_port_changes(struct ovsdb_idl_txn *ovnsb_txn,
 {
     struct hmapx_node *hmapx_node;
     struct ovn_port *op;
+
+    add_winnlb_affected_lsp_flows(trk_lsps);
 
     HMAPX_FOR_EACH (hmapx_node, &trk_lsps->deleted) {
         op = hmapx_node->data;

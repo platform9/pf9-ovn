@@ -8872,6 +8872,10 @@ sort | sed 's/table=../table=??/' ], [0], [dnl
   table=??(ls_in_check_port_sec), priority=100  , match=(eth.src[[40]]), action=(drop;)
   table=??(ls_in_check_port_sec), priority=100  , match=(vlan.present), action=(drop;)
   table=??(ls_in_check_port_sec), priority=105  , match=(((ip4 && icmp4.type == 3 && icmp4.code == 4) || (ip6 && icmp6.type == 2 && icmp6.code == 0)) && flags.tunnel_rx == 1), action=(drop;)
+  table=??(ls_in_check_port_sec), priority=110  , match=(((ip4 && icmp4.type == 3 && icmp4.code == 4) || (ip6 && icmp6.type == 2 && icmp6.code == 0)) && eth.src == 00:00:00:00:00:01 && outport == "sw0p1" && !is_chassis_resident("sw0p1") && flags.tunnel_rx == 1), action=(outport <-> inport; next;)
+  table=??(ls_in_check_port_sec), priority=110  , match=(((ip4 && icmp4.type == 3 && icmp4.code == 4) || (ip6 && icmp6.type == 2 && icmp6.code == 0)) && eth.src == 00:00:00:00:00:02 && outport == "sw0p2" && !is_chassis_resident("sw0p2") && flags.tunnel_rx == 1), action=(outport <-> inport; next;)
+  table=??(ls_in_check_port_sec), priority=110  , match=(((ip4 && icmp4.type == 3 && icmp4.code == 4) || (ip6 && icmp6.type == 2 && icmp6.code == 0)) && eth.src == 00:00:00:00:01:01 && outport == "sw0p1" && !is_chassis_resident("sw0p1") && flags.tunnel_rx == 1), action=(outport <-> inport; next;)
+  table=??(ls_in_check_port_sec), priority=110  , match=(((ip4 && icmp4.type == 3 && icmp4.code == 4) || (ip6 && icmp6.type == 2 && icmp6.code == 0)) && eth.src == 00:00:00:00:02:02 && outport == "sw0p2" && !is_chassis_resident("sw0p2") && flags.tunnel_rx == 1), action=(outport <-> inport; next;)
   table=??(ls_in_check_port_sec), priority=50   , match=(1), action=(reg0[[15]] = check_in_port_sec(); next;)
   table=??(ls_in_apply_port_sec), priority=0    , match=(1), action=(next;)
   table=??(ls_in_apply_port_sec), priority=50   , match=(reg0[[15]] == 1), action=(drop;)
@@ -8997,6 +9001,35 @@ sort | sed 's/table=../table=??/' ], [0], [dnl
   table=??(ls_out_check_port_sec), priority=0    , match=(1), action=(reg0[[15]] = check_out_port_sec(); next;)
   table=??(ls_out_check_port_sec), priority=100  , match=(eth.mcast), action=(reg0[[15]] = 0; next;)
 ])
+
+check ovn-nbctl --wait=sb lsp-add sw0 nlb1 -- \
+    lsp-set-addresses nlb1 "fa:16:3e:95:45:8d 10.96.7.33 10.96.7.40" -- \
+    lsp-set-port-security nlb1 \
+        "fa:16:3e:95:45:8d 10.96.7.33"
+
+ovn-sbctl dump-flows sw0 > sw0flows-before-nlb
+AT_CAPTURE_FILE([sw0flows-before-nlb])
+AT_CHECK([grep "arp.tpa == 10.96.7.40" sw0flows-before-nlb | grep "eth.src = fa:16:3e:95:45:8d"], [0], [ignore])
+
+check ovn-nbctl --wait=sb lsp-add sw0 nlb2 -- \
+    lsp-set-addresses nlb2 "fa:16:3e:2f:57:44 10.96.7.39" -- \
+    lsp-set-port-security nlb2 \
+        "fa:16:3e:2f:57:44 10.96.7.39" \
+        "03:bf:0a:60:07:28 10.96.7.40"
+
+ovn-sbctl dump-flows sw0 > sw0flows
+AT_CAPTURE_FILE([sw0flows])
+
+AT_CHECK([grep "arp.tpa == 10.96.7.40" sw0flows], [1], [])
+AT_CHECK([grep "arp.tpa == 10.96.7.33" sw0flows | grep "eth.src = fa:16:3e:95:45:8d"], [0], [ignore])
+AT_CHECK([grep "arp.tpa == 10.96.7.39" sw0flows | grep "eth.src = fa:16:3e:2f:57:44"], [0], [ignore])
+AT_CHECK([grep "eth.src == 03:bf:00:00:00:00/ff:ff:00:00:00:00" sw0flows], [0], [ignore])
+
+check ovn-nbctl --wait=sb lsp-del nlb2
+
+ovn-sbctl dump-flows sw0 > sw0flows-after-nlb
+AT_CAPTURE_FILE([sw0flows-after-nlb])
+AT_CHECK([grep "arp.tpa == 10.96.7.40" sw0flows-after-nlb | grep "eth.src = fa:16:3e:95:45:8d"], [0], [ignore])
 
 AT_CLEANUP
 ])

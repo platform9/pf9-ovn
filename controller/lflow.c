@@ -2725,6 +2725,50 @@ build_in_port_sec_ip4_flows(const struct sbrec_port_binding *pb,
                     &pb->header_.uuid);
 }
 
+/* Windows NLB IP reply: eth.src=real_MAC, ip.src=VIP (v4 or v6). The standard
+ * port-sec generates (real_MAC, real_IP) and (cluster_MAC, VIP) entries, but
+ * the cross-product (real_MAC, VIP) is missing and must be added explicitly. */
+static void
+build_in_port_sec_winnlb_ip_flows(const struct sbrec_port_binding *pb,
+                                  struct lport_addresses *real_ps_addr,
+                                  struct lport_addresses *winnlb_ps_addr,
+                                  struct match *m, struct ofpbuf *ofpacts,
+                                  struct ovn_desired_flow_table *flow_table)
+{
+    build_port_sec_allow_action(ofpacts);
+
+    for (size_t j = 0; j < winnlb_ps_addr->n_ipv4_addrs; j++) {
+        reset_match_for_port_sec_flows(pb, MFF_LOG_INPORT, m);
+        match_set_dl_src(m, real_ps_addr->ea);
+        match_set_dl_type(m, htons(ETH_TYPE_IP));
+        match_set_nw_src(m, winnlb_ps_addr->ipv4_addrs[j].addr);
+        ofctrl_add_flow(flow_table, OFTABLE_CHK_IN_PORT_SEC, 90,
+                        pb->header_.uuid.parts[0], m, ofpacts,
+                        &pb->header_.uuid);
+    }
+
+    build_port_sec_adv_nd_check(ofpacts);
+
+    for (size_t j = 0; j < winnlb_ps_addr->n_ipv6_addrs; j++) {
+        reset_match_for_port_sec_flows(pb, MFF_LOG_INPORT, m);
+        match_set_dl_src(m, real_ps_addr->ea);
+        match_set_dl_type(m, htons(ETH_TYPE_IPV6));
+
+        if (winnlb_ps_addr->ipv6_addrs[j].plen == 128
+            || !ipv6_addr_is_host_zero(&winnlb_ps_addr->ipv6_addrs[j].addr,
+                                       &winnlb_ps_addr->ipv6_addrs[j].mask)) {
+            match_set_ipv6_src(m, &winnlb_ps_addr->ipv6_addrs[j].addr);
+        } else {
+            match_set_ipv6_src_masked(m, &winnlb_ps_addr->ipv6_addrs[j].network,
+                                      &winnlb_ps_addr->ipv6_addrs[j].mask);
+        }
+
+        ofctrl_add_flow(flow_table, OFTABLE_CHK_IN_PORT_SEC, 90,
+                        pb->header_.uuid.parts[0], m, ofpacts,
+                        &pb->header_.uuid);
+    }
+}
+
 /* Adds the OF rules to allow ARP packets in 'in_port_sec_nd' table. */
 static void
 build_in_port_sec_arp_flows(const struct sbrec_port_binding *pb,
@@ -2777,6 +2821,32 @@ build_in_port_sec_arp_flows(const struct sbrec_port_binding *pb,
         } else {
             match_set_nw_src_masked(m, ps_addr->ipv4_addrs[j].addr, mask);
         }
+        ofctrl_add_flow(flow_table, OFTABLE_CHK_IN_PORT_SEC_ND, 90,
+                        pb->header_.uuid.parts[0], m, ofpacts,
+                        &pb->header_.uuid);
+    }
+}
+
+/* Windows NLB ARP reply: eth.src=real_MAC (for L2 routing) but
+ * arp.sha=cluster_MAC (to poison the requester's ARP cache toward multicast
+ * ICMP). These two fields deliberately differ -- no standard port_security
+ * entry covers this pattern. Generate priority-90 allow for:
+ * dl_src=real_MAC, arp_sha=cluster_MAC, arp_spa=VIP. */
+static void
+build_in_port_sec_winnlb_arp_flows(const struct sbrec_port_binding *pb,
+                                   struct lport_addresses *real_ps_addr,
+                                   struct lport_addresses *winnlb_ps_addr,
+                                   struct match *m, struct ofpbuf *ofpacts,
+                                   struct ovn_desired_flow_table *flow_table)
+{
+    build_port_sec_allow_action(ofpacts);
+
+    for (size_t j = 0; j < winnlb_ps_addr->n_ipv4_addrs; j++) {
+        reset_match_for_port_sec_flows(pb, MFF_LOG_INPORT, m);
+        match_set_dl_src(m, real_ps_addr->ea);
+        match_set_dl_type(m, htons(ETH_TYPE_ARP));
+        match_set_arp_sha(m, winnlb_ps_addr->ea);
+        match_set_nw_src(m, winnlb_ps_addr->ipv4_addrs[j].addr);
         ofctrl_add_flow(flow_table, OFTABLE_CHK_IN_PORT_SEC_ND, 90,
                         pb->header_.uuid.parts[0], m, ofpacts,
                         &pb->header_.uuid);
@@ -3187,6 +3257,16 @@ build_out_port_sec_ip6_flows(const struct sbrec_port_binding *pb,
                     &pb->header_.uuid);
 }
 
+/* Returns true if ps_addr is a Windows NLB cluster entry: MAC OUI 03:BF
+ * (Microsoft NLB multicast) with at least one IP (v4 or v6). */
+static bool
+is_winnlb_ps_addr(const struct lport_addresses *ps_addr)
+{
+    return ps_addr->ea.ea[0] == 0x03 &&
+           ps_addr->ea.ea[1] == 0xbf &&
+           (ps_addr->n_ipv4_addrs > 0 || ps_addr->n_ipv6_addrs > 0);
+}
+
 static void
 consider_port_sec_flows(const struct sbrec_port_binding *pb,
                         struct ovn_desired_flow_table *flow_table)
@@ -3234,6 +3314,24 @@ consider_port_sec_flows(const struct sbrec_port_binding *pb,
                                     flow_table);
         build_in_port_sec_nd_flows(pb, &ps_addrs[i], &match, &ofpacts,
                                    flow_table);
+    }
+
+    for (size_t i = 0; i < n_ps_addrs; i++) {
+        struct lport_addresses *real_addr = &ps_addrs[i];
+        if (is_winnlb_ps_addr(real_addr)) {
+            continue;
+        }
+        for (size_t k = 0; k < n_ps_addrs; k++) {
+            struct lport_addresses *winnlb_addr = &ps_addrs[k];
+            if (is_winnlb_ps_addr(winnlb_addr)) {
+                build_in_port_sec_winnlb_arp_flows(pb, real_addr, winnlb_addr,
+                                                   &match, &ofpacts,
+                                                   flow_table);
+                build_in_port_sec_winnlb_ip_flows(pb, real_addr, winnlb_addr,
+                                                  &match, &ofpacts,
+                                                  flow_table);
+            }
+        }
     }
 
     /* Out port security. */

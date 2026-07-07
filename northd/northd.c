@@ -8902,14 +8902,14 @@ add_multicast_allowed_address_pair_bypass(struct ovn_port *p,
     struct ds unq   = DS_EMPTY_INITIALIZER;
     const char *vif = lport_key_unquoted(p->json_key, &unq);
 
-    for (size_t i = 0; i < p->n_ps_addrs; i++) {
-        if (!eth_addr_is_multicast(p->ps_addrs[i].ea)) {
+    for (size_t i = 0; i < p->n_lsp_addrs; i++) {
+        if (!eth_addr_is_multicast(p->lsp_addrs[i].ea)) {
             continue;
         }
 
         ds_clear(&match);
         ds_put_format(&match, "inport == \"%s\" && eth.src == %s",
-                      vif, p->ps_addrs[i].ea_s);
+                      vif, p->lsp_addrs[i].ea_s);
         ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_CHECK_PORT_SEC,
                                 110, ds_cstr(&match), "next;",
                                 &p->nbsp->header_, NULL);
@@ -18794,7 +18794,7 @@ build_lswitch_and_lrouter_flows(
          * MAC (e.g. NLB/VRRP virtual MACs) -- see
          * add_multicast_allowed_address_pair_bypass() for rationale. */
         HMAP_FOR_EACH (op, key_node, lsi.ls_ports) {
-            if (!op || !op->od || !op->nbsp || !op->n_ps_addrs) {
+            if (!op || !op->od || !op->nbsp || !op->n_lsp_addrs) {
                 continue;
             }
             add_multicast_allowed_address_pair_bypass(op, lsi.lflows);

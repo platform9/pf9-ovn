@@ -8876,7 +8876,48 @@ add_minimal_portsec_bypass(struct ovn_port *p, struct lflow_table *lflows)
     ds_destroy(&match);
 }
 
+/* Per-port exception to the datapath-wide "broadcast/multicast source
+ * address is invalid" drop rule (S_SWITCH_IN_CHECK_PORT_SEC, priority 100,
+ * match "eth.src[40]" -- see build_lswitch_lflows_admission_control()).
+ *
+ * Neutron allows a port's allowed-address-pairs to name a multicast MAC
+ * (e.g. an NLB/VRRP-style virtual MAC) via the LSP port_security column.
+ * Without this exception, any VIF actually transmitting with that MAC as
+ * its Ethernet source would be dropped by the priority-100 rule before the
+ * per-address-pair allow flows (built later by ovn-controller from
+ * Port_Binding.port_security) are ever consulted.
+ *
+ * Scoped strictly to this inport and to the specific multicast MAC(s)
+ * present in its own port_security list, at a priority above the
+ * datapath-wide drop so it does not weaken the check for any other port. */
+static void
+add_multicast_allowed_address_pair_bypass(struct ovn_port *p,
+                                          struct lflow_table *lflows)
+{
+    if (!p || !p->od || !p->nbsp) {
+        return;
+    }
 
+    struct ds match = DS_EMPTY_INITIALIZER;
+    struct ds unq   = DS_EMPTY_INITIALIZER;
+    const char *vif = lport_key_unquoted(p->json_key, &unq);
+
+    for (size_t i = 0; i < p->n_ps_addrs; i++) {
+        if (!eth_addr_is_multicast(p->ps_addrs[i].ea)) {
+            continue;
+        }
+
+        ds_clear(&match);
+        ds_put_format(&match, "inport == \"%s\" && eth.src == %s",
+                      vif, p->ps_addrs[i].ea_s);
+        ovn_lflow_add_with_hint(lflows, p->od, S_SWITCH_IN_CHECK_PORT_SEC,
+                                110, ds_cstr(&match), "next;",
+                                &p->nbsp->header_, NULL);
+    }
+
+    ds_destroy(&unq);
+    ds_destroy(&match);
+}
 
 /*
  * Ingress table 30: Flows that forward ARP/ND requests only to the routers
@@ -18747,6 +18788,16 @@ build_lswitch_and_lrouter_flows(
             if (!allow_forged_mac && src_mac && src_mac[0]) {
                 add_l2only_mac_spoofing_prevention(op, lsi.lflows, src_mac);
             }
+        }
+
+        /* Per-port exception for allowed-address-pairs naming a multicast
+         * MAC (e.g. NLB/VRRP virtual MACs) -- see
+         * add_multicast_allowed_address_pair_bypass() for rationale. */
+        HMAP_FOR_EACH (op, key_node, lsi.ls_ports) {
+            if (!op || !op->od || !op->nbsp || !op->n_ps_addrs) {
+                continue;
+            }
+            add_multicast_allowed_address_pair_bypass(op, lsi.lflows);
         }
         stopwatch_stop(LFLOWS_PORTS_STOPWATCH_NAME, time_msec());
 /* PF9 stop */

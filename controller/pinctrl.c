@@ -3438,6 +3438,9 @@ pinctrl_handle_dns_lookup(
     struct ofpbuf *userdata, struct ofpbuf *continuation)
 {
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
+    /* PF9-DNS-DEBUG: generous limiter so we can observe the DNS punt path
+     * under load without flooding the log. Remove before merge. */
+    static struct vlog_rate_limit pf9_dns_dbg_rl = VLOG_RATE_LIMIT_INIT(200, 50);
     enum ofp_version version = rconn_get_version(swconn);
     enum ofputil_protocol proto = ofputil_protocol_from_ofp_version(version);
     struct dp_packet *pkt_out_ptr = NULL;

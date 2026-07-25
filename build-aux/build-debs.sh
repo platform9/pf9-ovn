@@ -40,6 +40,15 @@ printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROO
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/changelog"
 
+# dpkg-buildpackage only reads the TOPMOST changelog entry. An upstream rebase can
+# prepend a new "ovn (X.Y.Z-1)" entry above ours, silently shipping unversioned debs.
+ACTUAL_VER=$(cd "$ROOT" && dpkg-parsechangelog -S Version)
+if [ "$ACTUAL_VER" != "$PF9_OVN_BUILD_VERSION" ]; then
+    echo "ERROR: top debian/changelog entry is '$ACTUAL_VER', expected '$PF9_OVN_BUILD_VERSION'."
+    echo "The Platform9 changelog entry must be the topmost entry in debian/changelog."
+    exit 1
+fi
+
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---

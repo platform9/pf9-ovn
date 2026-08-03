@@ -5140,8 +5140,38 @@ pflow_lflow_output_sb_chassis_handler(struct engine_node *node,
     return true;
 }
 
+/* PF9 start */
+/* Returns a newly allocated string with the PF9-specific ".pf9.<...>"
+ * build sub-version stripped out of an OVN internal version string, e.g.
+ * "24.03.6.pf9.2026.4.0.385-20.33.0-76.8" -> "24.03.6-20.33.0-76.8".
+ * If no ".pf9" marker is found, returns an unmodified copy. The caller
+ * must free the returned value. */
+static char *
+ovn_version_base(const char *version)
+{
+    const char *pf9_marker = strstr(version, ".pf9");
+    if (!pf9_marker) {
+        return xstrdup(version);
+    }
+
+    const char *suffix = strchr(pf9_marker, '-');
+    size_t prefix_len = pf9_marker - version;
+    size_t suffix_len = suffix ? strlen(suffix) : 0;
+
+    char *base = xmalloc(prefix_len + suffix_len + 1);
+    memcpy(base, version, prefix_len);
+    if (suffix) {
+        memcpy(base + prefix_len, suffix, suffix_len);
+    }
+    base[prefix_len + suffix_len] = '\0';
+    return base;
+}
+/* PF9 end */
+
 /* Returns false if the northd internal version stored in SB_Global
- * and ovn-controller internal version don't match.
+ * and ovn-controller internal version don't match, ignoring the
+ * PF9-specific ".pf9.<...>" build sub-version on either side so that
+ * differing PF9 build/patch numbers don't count as a mismatch.
  */
 static bool
 check_northd_version(struct ovsdb_idl *ovs_idl, struct ovsdb_idl *ovnsb_idl,
@@ -5169,13 +5199,23 @@ check_northd_version(struct ovsdb_idl *ovs_idl, struct ovsdb_idl *ovnsb_idl,
     const char *northd_version =
         smap_get_def(&sb->options, "northd_internal_version", "");
 
-    if (strcmp(northd_version, version)) {
+    /* PF9 start */
+    char *version_base = ovn_version_base(version);
+    char *northd_version_base = ovn_version_base(northd_version);
+    bool mismatch = strcmp(northd_version_base, version_base);
+
+    if (mismatch) {
         static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 1);
         VLOG_WARN_RL(&rl, "controller version - %s mismatch with northd "
-                     "version - %s", version, northd_version);
+                     "version - %s", version_base, northd_version_base);
+        free(version_base);
+        free(northd_version_base);
         version_mismatch = true;
         return false;
     }
+    free(version_base);
+    free(northd_version_base);
+    /* PF9 end */
 
     /* If there used to be a mismatch and ovn-northd got updated, force a
      * full recompute.

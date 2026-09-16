@@ -60,8 +60,13 @@ override_dh_install-indep:
 	dh_install
 
 
+# --no-start: do not let debhelper start, stop or restart ovn-host in the
+# maintainer scripts.  The pf9-neutron-ovn-controller wrapper is upgraded in
+# lockstep with this package and restarts ovn-host from its after-install,
+# once its own configuration has been written.  Leaving the restart to the
+# wrapper keeps it to a single controlled stop/start per transaction.
 override_dh_installinit:
-	dh_installinit -R
+	dh_installinit --no-start
 
 override_dh_strip:
 	dh_strip

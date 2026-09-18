@@ -41,8 +41,15 @@ ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
 	fi
 endif
 
+# Build 5132375: `dist` only generates docs/manpages (DIST_HOOKS is just
+# check-debian-changelog-version; dist-hook-git is ALL_LOCAL), so with only the
+# dist call here the whole C compile was deferred to dh_auto_install's
+# `make install` (5.8 min, -j1 when DEB_BUILD_OPTIONS lacks parallel=N).
+# Mirror ovs/debian/rules: dist first, then a plain dh_auto_build so the
+# compile runs under `dh --parallel` (-jN) and install only installs.
 override_dh_auto_build:
 	dh_auto_build -- dist distdir=ovn
+	dh_auto_build
 
 override_dh_auto_clean:
 	dh_auto_clean

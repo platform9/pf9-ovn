@@ -58,6 +58,15 @@ pf9_install_build_deps_deb() {
 }
 
 pf9_install_build_deps_rpm() {
+    # Rocky's default mirrorlist hands BaseOS and AppStream to different
+    # mirrors, which can be out of sync for hours after an update push
+    # (TC 5134674: appstream had openssl-devel 3.5.8-1.el10_2 while the
+    # BaseOS mirror still lacked openssl-libs 3.5.8-1.el10_2 -> "nothing
+    # provides"). Pin every rocky repo to the canonical dl.rockylinux.org
+    # so all repos come from one consistent tree.
+    sed -i 's/^mirrorlist=/#mirrorlist=/; s/^#baseurl=/baseurl=/' /etc/yum.repos.d/rocky*.repo
+    dnf clean metadata
+
     # Enable EPEL and CRB repos for additional packages
     dnf install -y epel-release
     dnf config-manager --set-enabled crb
@@ -66,14 +75,17 @@ pf9_install_build_deps_rpm() {
     # system-rpm-config dependency) so %{?_smp_mflags} in the OVS/OVN specs
     # is guaranteed to expand to -j<ncpu>; without it both %build steps
     # silently fall back to a serial make.
-    dnf install -y \
-      rpm-build rpmdevtools redhat-rpm-config autoconf automake libtool gcc gcc-c++ \
+    local pkgs="rpm-build rpmdevtools redhat-rpm-config autoconf automake libtool gcc gcc-c++ \
       openssl openssl-devel python3-devel systemd-units checkpolicy \
       selinux-policy-devel groff graphviz libcap-ng-devel \
       unbound unbound-devel procps-ng bzip2 git createrepo_c \
       libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
       libevent-devel json-c-devel libunwind-devel \
-      desktop-file-utils libbpf-devel libxdp-devel
+      desktop-file-utils libbpf-devel libxdp-devel"
+    # One retry with fresh metadata covers a mirror that was mid-sync on the
+    # first attempt; a second failure is a real problem and must abort (set -e).
+    # shellcheck disable=SC2086
+    dnf install -y $pkgs || { sleep 30; dnf install -y --refresh $pkgs; }
 }
 
 # ---------------------------------------------------------------------------

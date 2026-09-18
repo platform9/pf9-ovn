@@ -4,19 +4,8 @@ set -e
 source pf9-version/pf9-version.rc
 source "$(dirname "$0")/build-common.sh"
 
-# Enable EPEL and CRB repos for additional packages
-dnf install -y epel-release
-dnf config-manager --set-enabled crb
-
-# Install dependencies
-dnf install -y \
-  rpm-build rpmdevtools autoconf automake libtool gcc gcc-c++ \
-  openssl openssl-devel python3-devel systemd-units checkpolicy \
-  selinux-policy-devel groff graphviz libcap-ng-devel \
-  unbound unbound-devel procps-ng bzip2 git createrepo_c \
-  libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
-  libevent-devel json-c-devel libunwind-devel \
-  desktop-file-utils libbpf-devel libxdp-devel
+# Install dependencies (list shared with build-ovs.sh, see build-common.sh)
+pf9_install_build_deps_rpm
 
 pf9_git_setup
 
@@ -45,19 +34,24 @@ pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes
-PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
+PF9_OVS_BUILD_VERSION=$(pf9_ovs_build_version "$ROCKY_VERSION")
 printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
-# Update OVS configure.ac
-sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
-
-# --- BUILD OVS ---
-# Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
-sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
-
-( cd "$ROOT/ovs" && ./boot.sh )
-( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
-( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )
+# --- BUILD OVS (or reuse a prebuilt tree) ---
+# Build 5132375: rebuilding the static-version OVS costs ~7 of ~18 min per
+# platform. If the TC artifact dependency dropped a matching
+# ovs-cache/ovs-build-r10.tar.gz (produced by build-ovs.sh) we restore it
+# instead (tree incl. ovs/rpm/rpmbuild/RPMS). The configure.ac/spec Epoch seds
+# live in pf9_patch_ovs_version_rpm and are applied ONLY on the from-source
+# path: a cached tree was already patched by the producer. Without ovs-cache/
+# this behaves exactly as before.
+if pf9_restore_ovs_cache "$ROCKY_VERSION"; then
+    echo "OVS: using cached build tree"
+else
+    echo "OVS: building from source"
+    pf9_patch_ovs_version_rpm
+    pf9_build_ovs_rpm
+fi
 
 # Install OVS RPMs required for OVN build
 dnf install -y "$ROOT"/ovs/rpm/rpmbuild/RPMS/*/*.rpm || true

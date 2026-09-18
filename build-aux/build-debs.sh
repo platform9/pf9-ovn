@@ -4,16 +4,8 @@ set -e
 source pf9-version/pf9-version.rc
 source "$(dirname "$0")/build-common.sh"
 
-# Install dependencies
-apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-  fakeroot build-essential autoconf automake bzip2 debhelper devscripts dpkg-dev \
-  debhelper-compat dh-exec dh-python dh-sequence-python3 dh-sequence-sphinxdoc \
-  graphviz iproute2 libcap-ng-dev libnuma-dev libpcap-dev libssl-dev libtool \
-  libunbound-dev openssl pkg-config procps python3-all-dev python3-setuptools \
-  python3-sortedcontainers python3-sphinx libjson-c-dev libevent-dev \
-  libsystemd-dev python3 python3-pip curl python3-twisted python3-zope.interface \
-  libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
+# Install dependencies (list shared with build-ovs.sh, see build-common.sh)
+pf9_install_build_deps_deb
 
 pf9_git_setup
 
@@ -46,23 +38,24 @@ pf9_patch_ovn_binary_version
 # Static version (no build counter): only bump manually when OVS code changes.
 # Epoch 1 beats upstream; omitting build counter means existing CI-versioned
 # installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
+PF9_OVS_BUILD_VERSION=$(pf9_ovs_build_version "$UBUNTU_VERSION")
 printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
-# Update OVS Changelog
-sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
-
-# Python setuptools sanitization (PEP 440)
-# Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
-sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
-
-# --- BUILD OVS ---
-# Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
-# Since we build in $ROOT/ovs, debs land in $ROOT.
-( cd "$ROOT/ovs" && ./boot.sh )
-( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
-( cd "$ROOT/ovs" && make debian && make debian-deb)
+# --- BUILD OVS (or reuse a prebuilt tree) ---
+# Build 5132375: OVS boot/configure/dist 2.2 + make -j8 3.6 + install/dh/debs
+# 1.0 = ~7 of ~18 min per platform, for a static OVS version. If the TC
+# artifact dependency dropped a matching ovs-cache/ovs-build-<plat>.tar.gz
+# (produced by build-ovs.sh) we restore it instead. The version seds live in
+# pf9_patch_ovs_version_deb and are applied ONLY on the from-source path: a
+# cached tree was already patched by the producer. Without ovs-cache/ this
+# behaves exactly as before.
+if pf9_restore_ovs_cache "$UBUNTU_VERSION"; then
+    echo "OVS: using cached build tree"
+else
+    echo "OVS: building from source"
+    pf9_patch_ovs_version_deb
+    pf9_build_ovs_deb
+fi
 
 # Install OVS dependencies required for OVN build
 cd "$ROOT"
@@ -85,7 +78,15 @@ test -f "$OVSBUILDDIR/config.status" || { echo "OVS not configured at $OVSBUILDD
 export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
-DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
+# Build 5132375: OVN compile took 5.8 min because debian/rules defers the
+# compile to dh_auto_install, and without parallel=N in DEB_BUILD_OPTIONS
+# `dh --parallel` runs `make -j1`. OVS's own debian-deb target already passes
+# parallel=$(nproc); do the same here (-j is belt and braces: dpkg-buildpackage
+# adds parallel=N itself if absent). noautodbgsym skips building the -dbgsym
+# packages that are deleted below anyway; nodoc deliberately NOT added because
+# debhelper's nodoc also skips dh_installman and would drop the man pages
+# shipped in ovn-common/ovn-host/ovn-central.
+DEB_BUILD_OPTIONS="nocheck noautodbgsym parallel=$(nproc)" dpkg-buildpackage -b -us -uc -j"$(nproc)"
 
 # Remove bloat packages before artifact collection
 find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \

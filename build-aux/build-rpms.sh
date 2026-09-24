@@ -33,8 +33,6 @@ if [ "$ROCKY_VERSION" != "r10" ]; then
     exit 1
 fi
 
-pf9_submodule_update
-
 # --- OVN CONFIGURATION ---
 # RPM Version field does not allow hyphens; use dots throughout
 printf '%s\n' "1:${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
@@ -48,16 +46,32 @@ pf9_patch_ovn_binary_version
 PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
 printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
-# Update OVS configure.ac
-sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
+# --- BUILD OVS (or reuse a prebuilt tree) ---
+# try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
+# configure.ac version edits, boot/configure/make and packs the result for next time before moving on.
+EXPECTED_OVS_SHA=$(git -C "$ROOT" rev-parse HEAD:ovs) || {
+    echo "Unable to determine OVS gitlink from OVN repository"
+    exit 1
+}
 
-# --- BUILD OVS ---
-# Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
-sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+if pf9_restore_ovs_cache "$ROCKY_VERSION" "$EXPECTED_OVS_SHA"; then
+    echo "OVS: using cached build tree"
+else
+    echo "OVS: building from source"
+    pf9_submodule_update
 
-( cd "$ROOT/ovs" && ./boot.sh )
-( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
-( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )
+    # Update OVS configure.ac
+    sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
+
+    # Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
+    sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+
+    ( cd "$ROOT/ovs" && ./boot.sh )
+    ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
+    ( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )
+
+    pf9_pack_ovs_cache "$ROCKY_VERSION"
+fi
 
 # Install OVS RPMs required for OVN build
 dnf install -y "$ROOT"/ovs/rpm/rpmbuild/RPMS/*/*.rpm || true

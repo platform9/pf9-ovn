@@ -30,8 +30,6 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
     exit 1
 fi
 
-pf9_submodule_update
-
 # --- OVN CONFIGURATION ---
 PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
 printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
@@ -49,20 +47,36 @@ pf9_patch_ovn_binary_version
 PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
 printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
-# Update OVS Changelog
-sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
+# --- BUILD OVS (or reuse a prebuilt tree) ---
+# try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
+# configure.ac version edits, boot/configure/make and packs the result for next time before moving on.
+EXPECTED_OVS_SHA=$(git -C "$ROOT" rev-parse HEAD:ovs) || {
+    echo "Unable to determine OVS gitlink from OVN repository"
+    exit 1
+}
 
-# Python setuptools sanitization (PEP 440)
-# Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
-sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
+if pf9_restore_ovs_cache "$UBUNTU_VERSION" "$EXPECTED_OVS_SHA"; then
+    echo "OVS: using cached build tree"
+else
+    echo "OVS: building from source"
+    pf9_submodule_update
 
-# --- BUILD OVS ---
-# Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
-# Since we build in $ROOT/ovs, debs land in $ROOT.
-( cd "$ROOT/ovs" && ./boot.sh )
-( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
-( cd "$ROOT/ovs" && make debian && make debian-deb)
+    # Update OVS Changelog
+    sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
+
+    # Python setuptools sanitization (PEP 440)
+    # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
+    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+    sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
+
+    # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
+    # Since we build in $ROOT/ovs, debs land in $ROOT.
+    ( cd "$ROOT/ovs" && ./boot.sh )
+    ( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
+    ( cd "$ROOT/ovs" && make debian && make debian-deb)
+
+    pf9_pack_ovs_cache "$UBUNTU_VERSION"
+fi
 
 # Install OVS dependencies required for OVN build
 cd "$ROOT"

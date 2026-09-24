@@ -5,8 +5,8 @@ set -o pipefail
  
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$TEAMCITY_ROOT/pf9-ovn"
-WORK_DIR="$TEAMCITY_ROOT/build"
-LOG_DIR="$TEAMCITY_ROOT/build-logs"
+WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
+LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
 
@@ -32,7 +32,22 @@ declare -A SCRIPT_ARGS=(
 )
 PLATFORMS=(u22 u24 r10 k8s)
 
-rm -rf "$WORK_DIR" "$LOG_DIR"
+echo "=== Cleaning up artifacts from older failed builds ==="
+
+rm -rf "$LOG_DIR"
+
+for plat in "${PLATFORMS[@]}"; do
+    dir="$WORK_DIR/$plat"
+    image="${IMAGE[$plat]}"
+    docker run --rm \
+        -v "$dir:$CONTAINER_MOUNT" \
+        -w "$CONTAINER_MOUNT" \
+        "$image" \
+        bash -c 'rm -rf -- ./* ./.[!.]*'
+
+    rm -rf "$dir"
+done
+
 mkdir -p "$WORK_DIR" "$LOG_DIR"
 mkdir -p "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT/ovs-cache"
 
@@ -133,7 +148,7 @@ run_platform_job() {
         -v "$dir:$CONTAINER_MOUNT" \
         -w "$CONTAINER_MOUNT" \
         "$image" \
-        bash -c 'rm -rf -- ./* ./.??*'
+        bash -c 'rm -rf -- ./* ./.[!.]*'
 
     rm -rf "$dir"
     return "$status"

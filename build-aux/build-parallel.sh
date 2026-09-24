@@ -5,8 +5,8 @@ set -o pipefail
  
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$TEAMCITY_ROOT/pf9-ovn"
-WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
-LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
+WORK_DIR="$TEAMCITY_ROOT/build"
+LOG_DIR="$TEAMCITY_ROOT/build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
 

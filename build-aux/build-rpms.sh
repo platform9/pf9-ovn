@@ -4,8 +4,19 @@ set -e
 source pf9-version/pf9-version.rc
 source "$(dirname "$0")/build-common.sh"
 
-# Install dependencies (list shared with build-ovs.sh, see build-common.sh)
-pf9_install_build_deps_rpm
+# Enable EPEL and CRB repos for additional packages
+dnf install -y epel-release
+dnf config-manager --set-enabled crb
+
+# Install dependencies
+dnf install -y \
+  rpm-build rpmdevtools autoconf automake libtool gcc gcc-c++ \
+  openssl openssl-devel python3-devel systemd-units checkpolicy \
+  selinux-policy-devel groff graphviz libcap-ng-devel \
+  unbound unbound-devel procps-ng bzip2 git createrepo_c \
+  libpcap-devel numactl-devel python3-sphinx python3-sortedcontainers \
+  libevent-devel json-c-devel libunwind-devel \
+  desktop-file-utils libbpf-devel libxdp-devel systemtap-sdt-devel
 
 pf9_git_setup
 
@@ -22,8 +33,6 @@ if [ "$ROCKY_VERSION" != "r10" ]; then
     exit 1
 fi
 
-pf9_submodule_update
-
 # --- OVN CONFIGURATION ---
 # RPM Version field does not allow hyphens; use dots throughout
 printf '%s\n' "1:${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
@@ -34,23 +43,34 @@ pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
 # Static version (no build counter): only bump manually when OVS code changes
-PF9_OVS_BUILD_VERSION=$(pf9_ovs_build_version "$ROCKY_VERSION")
+PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
 printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
-# Build 5132375: rebuilding the static-version OVS costs ~7 of ~18 min per
-# platform. If the TC artifact dependency dropped a matching
-# ovs-cache/ovs-build-r10.tar.gz (produced by build-ovs.sh) we restore it
-# instead (tree incl. ovs/rpm/rpmbuild/RPMS). The configure.ac/spec Epoch seds
-# live in pf9_patch_ovs_version_rpm and are applied ONLY on the from-source
-# path: a cached tree was already patched by the producer. Without ovs-cache/
-# this behaves exactly as before.
-if pf9_restore_ovs_cache "$ROCKY_VERSION"; then
+# try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
+# configure.ac version edits, boot/configure/make and packs the result for next time before moving on.
+EXPECTED_OVS_SHA=$(git -C "$ROOT" rev-parse HEAD:ovs) || {
+    echo "Unable to determine OVS gitlink from OVN repository"
+    exit 1
+}
+
+if pf9_restore_ovs_cache "$ROCKY_VERSION" "$EXPECTED_OVS_SHA"; then
     echo "OVS: using cached build tree"
 else
     echo "OVS: building from source"
-    pf9_patch_ovs_version_rpm
-    pf9_build_ovs_rpm
+    pf9_submodule_update
+
+    # Update OVS configure.ac
+    sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
+
+    # Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
+    sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+
+    ( cd "$ROOT/ovs" && ./boot.sh )
+    ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
+    ( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )
+
+    pf9_pack_ovs_cache "$ROCKY_VERSION"
 fi
 
 # Install OVS RPMs required for OVN build

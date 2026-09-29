@@ -5,8 +5,8 @@ set -o pipefail
  
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$TEAMCITY_ROOT/pf9-ovn"
-WORK_DIR="$TEAMCITY_ROOT/.build"
-LOG_DIR="$TEAMCITY_ROOT/.build-logs"
+WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
+LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
 
@@ -32,9 +32,28 @@ declare -A SCRIPT_ARGS=(
 )
 PLATFORMS=(u22 u24 r10 k8s)
 
+# k8s is best-effort: older commits have no build-ovn-k8s.sh (it lived inline in
+# TeamCity, which still runs it in its own step for those commits). If the script
+# is missing, drop k8s from PLATFORMS so every stage below (checkout copy, launch,
+# wait, collect) skips it.
+if [ ! -f "$ROOT/build-aux/${SCRIPT[k8s]}" ]; then
+    echo "k8s: build-aux/${SCRIPT[k8s]} not found in this commit - skipping k8s here (handled by the TeamCity k8s step)"
+    PLATFORMS=(u22 u24 r10)
+fi
+
+
 echo "=== Cleaning up artifacts from older failed builds ==="
 
-rm -rf "$LOG_DIR"
+docker run \
+    --rm \
+    --name "pf9-ovn-parallel-cleanup-before-build" \
+    -v "$WORK_DIR":"$CONTAINER_MOUNT" \
+    -w "$CONTAINER_MOUNT" \
+    "quay.io/platform9/ubuntu:24.04" \
+    bash -c "chmod -R 777 $CONTAINER_MOUNT"
+
+rm -rf "$WORK_DIR" "$LOG_DIR"
+
 mkdir -p "$WORK_DIR" "$LOG_DIR"
 mkdir -p "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT/ovs-cache"
 
@@ -47,8 +66,9 @@ for plat in "${PLATFORMS[@]}"; do
     if [ "$plat" = "k8s" ]; then
         cp -a "$TEAMCITY_ROOT/pf9-ovn-kubernetes" "$dir/pf9-ovn-kubernetes"
     fi
-    if [ -d "$TEAMCITY_ROOT/ovs-cache" ]; then
-        cp -a "$TEAMCITY_ROOT/ovs-cache" "$dir/ovs-cache"
+    if [ "$plat" != "k8s" ] && [ -f "$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz" ]; then
+        mkdir -p "$dir/ovs-cache"
+        cp -a "$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz" "$dir/ovs-cache/"
     fi
     
     while IFS= read -r -d '' gitdir; do
@@ -78,6 +98,7 @@ run_platform_job() {
             --rm \
             --name "pf9-ovn-parallel-${plat}-${BUILD_NUMBER}-perms-override" \
             -v "$WORK_DIR":"$CONTAINER_MOUNT" \
+            -w "$CONTAINER_MOUNT" \
             "$image" \
             bash -c "chmod -R 777 $CONTAINER_MOUNT/$plat"
 

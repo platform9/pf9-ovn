@@ -28,8 +28,8 @@ docker build --no-cache \
 # Tag for public ECR
 docker tag "$DOCKER_REPOSITORY:$TAG" "$ECR_PUBLIC_REPOSITORY:$TAG"
 # Push to Quay and public ECR
-#docker push "$DOCKER_REPOSITORY:$TAG"
-#docker push "$ECR_PUBLIC_REPOSITORY:$TAG"
+docker push "$DOCKER_REPOSITORY:$TAG"
+docker push "$ECR_PUBLIC_REPOSITORY:$TAG"
 # Record tag as before
 echo "$TAG" > "$TEAMCITY_ROOT/container-tag.txt"
 cd "$TEAMCITY_ROOT"

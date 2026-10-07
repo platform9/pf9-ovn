@@ -4,8 +4,8 @@
 TEAMCITY_ROOT="$(pwd)"
 ROOT="$(pwd)/pf9-ovn"
 
-OVS_BASE="3.6.2"
-OVN_BASE="25.09.3"
+OVS_BASE="3.3.6"
+OVN_BASE="24.03.6"
 
 # Cache tarball for a prebuilt OVS tree (see pf9_pack_ovs_cache / pf9_restore_ovs_cache).
 # Consumers (build-debs.sh / build-rpms.sh) look for it under

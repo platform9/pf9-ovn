@@ -40,7 +40,7 @@ pf9_build_reset() {
     # packed -- see pf9_pack_ovs_cache below), so guard this or a cache hit
     # would make cleanup fail here every time. A from-source tree still goes
     # through the same git reset/clean as before.
-    if [ -d .git ]; then
+    if [ -e .git ]; then
         git reset HEAD --hard
         git clean -fdx
     else

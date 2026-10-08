@@ -54,6 +54,7 @@ docker run \
 
 rm -rf "$WORK_DIR" "$LOG_DIR"
 
+rm -rf "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT"/ovn-*-version.txt
 mkdir -p "$WORK_DIR" "$LOG_DIR"
 mkdir -p "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT/ovs-cache"
 
@@ -167,7 +168,9 @@ for plat in "${PLATFORMS[@]}"; do
     if wait "${PID[$plat]}"; then
         echo "  $plat: SUCCESS"
     else
-        echo "  $plat: FAILED (see $LOG_DIR/$plat.log)"
+        echo "  $plat: FAILED (see $LOG_DIR/$plat.log). Printing the last 100 lines of the log:"
+        tail -n 100 "$LOG_DIR/$plat.log"
+        echo "====="
         FAILED+=("$plat")
     fi
 done
@@ -175,9 +178,7 @@ done
 rm -rf "$WORK_DIR"
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
-    echo "=== FAILED platforms: ${FAILED[*]} - skipping final container build/publish ==="
-    echo "Partial pkgs/ and ovs-cache/ have still been collected above for diagnostics"
-    echo "and will still be published (TeamCity: 'Publish artifacts: even if build fails')."
+    echo "=== FAILED platforms: ${FAILED[*]} ==="
     exit 1
 fi
 

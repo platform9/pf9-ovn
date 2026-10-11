@@ -100,6 +100,7 @@ run_platform_job() {
             --name "pf9-ovn-parallel-${plat}-${BUILD_NUMBER}-perms-override" \
             -v "$WORK_DIR":"$CONTAINER_MOUNT" \
             -w "$CONTAINER_MOUNT" \
+            -e SKIP_OVS_CACHE \
             "$image" \
             bash -c "chmod -R 777 $CONTAINER_MOUNT/$plat"
 

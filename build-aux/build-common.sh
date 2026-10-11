@@ -121,6 +121,11 @@ pf9_pack_ovs_cache() {
 # NOTE: designed to be used as `if pf9_restore_ovs_cache ...` -- bash disables
 # `set -e` inside an if-condition, so every step here checks its own status.
 pf9_restore_ovs_cache() {
+    if [ $SKIP_OVS_CACHE -eq 1 ]; then
+        echo "OVS cache: SKIP_OVS_CACHE=1 -> building OVS from source"
+        return 1
+    fi
+
     local plat="$1"
     local expected_ovs_sha="$2"
     local tarball="$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz"

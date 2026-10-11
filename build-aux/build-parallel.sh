@@ -88,6 +88,7 @@ run_platform_job() {
         -v "$dir":"$CONTAINER_MOUNT" \
         -w "$CONTAINER_MOUNT" \
         -e BUILD_NUMBER="$BUILD_NUMBER" \
+        -e SKIP_OVS_CACHE="$SKIP_OVS_CACHE" \
         "$image" \
         bash -c "bash pf9-ovn/build-aux/$script $args && chmod -R 777 $CONTAINER_MOUNT"
  
@@ -100,7 +101,6 @@ run_platform_job() {
             --name "pf9-ovn-parallel-${plat}-${BUILD_NUMBER}-perms-override" \
             -v "$WORK_DIR":"$CONTAINER_MOUNT" \
             -w "$CONTAINER_MOUNT" \
-            -e SKIP_OVS_CACHE \
             "$image" \
             bash -c "chmod -R 777 $CONTAINER_MOUNT/$plat"
 

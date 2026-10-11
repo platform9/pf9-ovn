@@ -1,6 +1,5 @@
 
 set -e
-set -u
 set -o pipefail
  
 TEAMCITY_ROOT="$(pwd)"
@@ -9,7 +8,6 @@ WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
 LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
-: "${SKIP_OVS_CACHE:=0}"
 
 CONTAINER_MOUNT=/build
  
@@ -89,7 +87,7 @@ run_platform_job() {
         -v "$dir":"$CONTAINER_MOUNT" \
         -w "$CONTAINER_MOUNT" \
         -e BUILD_NUMBER="$BUILD_NUMBER" \
-        -e SKIP_OVS_CACHE="$SKIP_OVS_CACHE" \
+        -e SKIP_OVS_CACHE="${SKIP_OVS_CACHE:-"0"}" \
         "$image" \
         bash -c "bash pf9-ovn/build-aux/$script $args && chmod -R 777 $CONTAINER_MOUNT"
  

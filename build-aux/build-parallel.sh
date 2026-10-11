@@ -9,6 +9,7 @@ WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
 LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
+: "${SKIP_OVS_CACHE:=0}"
 
 CONTAINER_MOUNT=/build
  

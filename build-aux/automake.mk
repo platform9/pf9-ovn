@@ -4,6 +4,9 @@ EXTRA_DIST += \
     build-aux/build-debs.sh \
 	build-aux/calculate-pipeline-cksum \
     build-aux/build-rpms.sh \
+	build-aux/build-container-publish.sh \
+	build-aux/build-ovn-k8s.sh \
+	build-aux/build-parallel.sh \
 	build-aux/calculate-schema-cksum \
 	build-aux/cccl \
 	build-aux/cksum-pipeline-check \

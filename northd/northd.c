@@ -8251,14 +8251,22 @@ add_l2only_mac_spoofing_prevention(struct ovn_port *p, struct lflow_table *lflow
  * build_lswitch_learn_fdb_op(): port security disabled + "unknown"
  * addressing. This is the broader condition that put_fdb() actually uses;
  * port_is_l2_only_port() is a strict subset of it that additionally
- * requires the "l2-port" external_id. */
+ * requires the "l2-port" external_id.
+ *
+ * Uses n_ps_addrs (the count of port_security entries that actually parsed
+ * as valid addresses), not nbsp->n_port_security (the raw NB column count),
+ * to stay exactly in sync with build_lswitch_learn_fdb_op()'s own condition
+ * - a malformed port_security entry makes n_port_security > 0 while
+ * n_ps_addrs stays 0, so using n_port_security here would wrongly skip
+ * anti-spoof protection on a port that put_fdb() still treats as eligible
+ * for learning. */
 static bool
 port_is_fdb_learning_vif(const struct ovn_port *op)
 {
     if (!op || !op->nbsp || !is_vif_lsp(op->nbsp)) {
         return false;
     }
-    return op->has_unknown && !op->nbsp->n_port_security;
+    return op->has_unknown && !op->n_ps_addrs;
 }
 
 /* Stop a port with FDB learning enabled (port security off + "unknown"

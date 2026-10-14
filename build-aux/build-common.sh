@@ -14,8 +14,8 @@ OVN_BASE="24.03.6"
 # have dropped it there before the platform build runs.
 PF9_OVS_CACHE_META=".pf9-ovs-cache.meta"
 
-# PF9_DEBUG_SYMBOLS (TeamCity parameter env.PF9_DEBUG_SYMBOLS, default false): when true,
-# the builds also keep the debug-symbol packages the toolchain already generates
+# PF9_DEBUG_SYMBOLS (TeamCity parameter env.PF9_DEBUG_SYMBOLS, default true; set it to
+# false to skip): the builds also keep the debug-symbol packages the toolchain already generates
 # (-dbgsym .ddeb on Ubuntu, -debuginfo/-debugsource RPMs on Rocky), so perf/gdb can
 # symbolize exactly this build. They go to debug/<os>-dbgsym or debug/<os>-debuginfo,
 # next to pkgs/ rather than inside it, so Packages.tar.gz (the hostagent repo and
@@ -24,9 +24,9 @@ PF9_OVS_CACHE_META=".pf9-ovs-cache.meta"
 PF9_DEBUG_DIR="$TEAMCITY_ROOT/debug"
 
 pf9_debug_symbols_enabled() {
-    case "${PF9_DEBUG_SYMBOLS:-false}" in
-        true|TRUE|True|1|yes|on) return 0 ;;
-        *) return 1 ;;
+    case "${PF9_DEBUG_SYMBOLS:-true}" in
+        false|FALSE|False|0|no|off) return 1 ;;
+        *) return 0 ;;
     esac
 }
 

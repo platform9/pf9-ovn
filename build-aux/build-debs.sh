@@ -87,7 +87,7 @@ export OVSDIR OVSBUILDDIR EXTRA_CONFIGURE_OPTS="--with-ovs-build=$OVSBUILDDIR"
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
-# --- DEBUG SYMBOLS (optional, PF9_DEBUG_SYMBOLS=true) ---
+# --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
 # dh_strip always generates -dbgsym packages, but Ubuntu's debhelper writes them as
 # *.ddeb, which the *.deb globs below never match, and pf9_build_reset would wipe the OVS
 # ones. When enabled, collect them before anything is deleted.

@@ -75,6 +75,19 @@ export OVSDIR OVSBUILDDIR OVSVERSION=${OVS_BASE}
 
 make rpm-fedora RPMBUILD_OPT="--without check"
 
+# --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
+# rpmbuild generates -debuginfo/-debugsource RPMs; normally they are deleted below.
+# When enabled, copy them aside first.
+if pf9_debug_symbols_enabled; then
+    DEBUGINFO_DIR="$PF9_DEBUG_DIR/${ROCKY_VERSION}-debuginfo"
+    mkdir -p "$DEBUGINFO_DIR"
+    find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
+        \( -name "*-debuginfo-*" -o -name "*-debugsource-*" \) \
+        -exec cp -v {} "$DEBUGINFO_DIR" \;
+    ls -la "$DEBUGINFO_DIR"
+    pf9_pack_debug_symbols
+fi
+
 # Remove bloat packages before artifact collection
 find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
     \( -name "*-debuginfo-*" -o -name "*-debugsource-*" -o -name "*-devel-*" \) \

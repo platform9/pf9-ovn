@@ -61,7 +61,7 @@ sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
 # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
 # Since we build in $ROOT/ovs, debs land in $ROOT.
 ( cd "$ROOT/ovs" && ./boot.sh )
-( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
+( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH) --enable-ssl --enable-shared )
 ( cd "$ROOT/ovs" && make debian && make debian-deb)
 
 # Install OVS dependencies required for OVN build

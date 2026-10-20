@@ -19,6 +19,7 @@ dnf install -y \
   desktop-file-utils libbpf-devel libxdp-devel
 
 pf9_git_setup
+pf9_reset_debug_symbols
 
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
@@ -80,6 +81,7 @@ make rpm-fedora RPMBUILD_OPT="--without check"
 # When enabled, copy them aside first.
 if pf9_debug_symbols_enabled; then
     DEBUGINFO_DIR="$PF9_DEBUG_DIR/${ROCKY_VERSION}-debuginfo"
+    rm -rf "$DEBUGINFO_DIR"
     mkdir -p "$DEBUGINFO_DIR"
     find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
         \( -name "*-debuginfo-*" -o -name "*-debugsource-*" \) \

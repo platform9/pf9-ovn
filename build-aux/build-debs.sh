@@ -16,6 +16,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
 
 pf9_git_setup
+pf9_reset_debug_symbols
 
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
@@ -93,6 +94,7 @@ DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 # ones. When enabled, collect them before anything is deleted.
 if pf9_debug_symbols_enabled; then
     DBGSYM_DIR="$PF9_DEBUG_DIR/${UBUNTU_VERSION}-dbgsym"
+    rm -rf "$DBGSYM_DIR"
     mkdir -p "$DBGSYM_DIR"
     find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 \( -name "*-dbgsym_*.ddeb" -o -name "*-dbgsym_*.deb" \) \
         -exec mv -v {} "$DBGSYM_DIR" \;

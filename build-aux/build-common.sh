@@ -23,11 +23,30 @@ pf9_debug_symbols_enabled() {
     esac
 }
 
+# pf9_reset_debug_symbols removes debug/ and debug.tar.gz left by an earlier build on
+# this agent, so a build never publishes another build's symbols (they would not match
+# its BuildIDs). Each OS build is its own TeamCity step in one shared checkout and the
+# steps add to debug/ in turn, so the reset runs once per build: the first step of a new
+# BUILD_NUMBER clears and stamps debug/, and later steps of the same build see the stamp
+# and keep what earlier steps collected. Without a BUILD_NUMBER (a local run) it always
+# clears. It runs whether or not symbols are enabled, so a build with
+# PF9_DEBUG_SYMBOLS=false cannot pick up a stale debug.tar.gz either.
+pf9_reset_debug_symbols() {
+    if [ -n "${BUILD_NUMBER:-}" ] && \
+       [ "$(cat "$PF9_DEBUG_DIR/.build-number" 2>/dev/null)" = "$BUILD_NUMBER" ]; then
+        return 0
+    fi
+    rm -rf "$PF9_DEBUG_DIR"
+    rm -f "$TEAMCITY_ROOT/debug.tar.gz"
+    mkdir -p "$PF9_DEBUG_DIR"
+    printf '%s\n' "${BUILD_NUMBER:-}" > "$PF9_DEBUG_DIR/.build-number"
+}
+
 # pf9_pack_debug_symbols (re)creates $TEAMCITY_ROOT/debug.tar.gz from everything collected
 # in debug/ so far. Each OS build calls it, so after the last one the archive holds all
 # of them.
 pf9_pack_debug_symbols() {
-    tar -czf "$TEAMCITY_ROOT/debug.tar.gz" -C "$TEAMCITY_ROOT" debug
+    tar -czf "$TEAMCITY_ROOT/debug.tar.gz" -C "$TEAMCITY_ROOT" --exclude=.build-number debug
     ls -la "$TEAMCITY_ROOT/debug.tar.gz"
 }
 

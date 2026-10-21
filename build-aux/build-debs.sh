@@ -68,6 +68,9 @@ else
     # Update OVS Changelog
     sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
 
+    # Pin xz for OVS debs too: dh_builddeb on ubuntu 22.04 ignores DPKG_DEB_COMPRESSOR_TYPE
+    printf '\noverride_dh_builddeb:\n\tdh_builddeb -- -Zxz\n' >> "$ROOT/ovs/debian/rules"
+
     # Python setuptools sanitization (PEP 440)
     # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
     PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")

@@ -1,6 +1,10 @@
 set -x
 set -e
 
+# dpkg-deb picks zstd by default on newer dpkg; pin xz for every .deb built here
+# (OVS make debian-deb and dpkg-buildpackage both inherit this).
+export DPKG_DEB_COMPRESSOR_TYPE=xz
+
 source pf9-version/pf9-version.rc
 source "$(dirname "$0")/build-common.sh"
 

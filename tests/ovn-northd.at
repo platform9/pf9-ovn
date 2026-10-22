@@ -13436,3 +13436,116 @@ wait_row_count Multicast_Group 0 name=239.0.1.68
 OVN_CLEANUP([hv1], [hv2])
 AT_CLEANUP
 ])
+
+OVN_FOR_EACH_NORTHD_NO_HV([
+AT_SETUP([PCD-4343 live migration incremental processing])
+ovn_start
+
+check_recompute_counter() {
+    northd_recomp=$(as northd ovn-appctl -t ovn-northd inc-engine/show-stats northd recompute)
+    AT_CHECK([test x$northd_recomp = x$1])
+    lflow_recomp=$(as northd ovn-appctl -t ovn-northd inc-engine/show-stats lflow recompute)
+    AT_CHECK([test x$lflow_recomp = x$2])
+}
+
+check ovn-nbctl --wait=sb ls-add sw0
+check ovn-nbctl --wait=sb lr-add lr0
+check ovn-nbctl --wait=sb lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
+check ovn-nbctl --wait=sb -- lsp-add sw0 sw0-lr0 -- lsp-set-type sw0-lr0 router -- lsp-set-addresses sw0-lr0 router -- lsp-set-options sw0-lr0 router-port=lr0-sw0
+
+check ovn-nbctl --wait=sb -- lsp-add sw0 p1 -- lsp-set-addresses p1 unknown
+
+check ovn-sbctl chassis-add ch1 geneve 127.0.0.1
+check ovn-sbctl chassis-add ch2 geneve 127.0.0.2
+check ovn-sbctl lsp-bind p1 ch1
+check ovn-nbctl --wait=sb sync
+
+ovn-sbctl dump-flows sw0 > before_mig_flows
+AT_CAPTURE_FILE([before_mig_flows])
+AT_CHECK([grep -c 'ls_in_lookup_fdb.*inport == \"p1\"' before_mig_flows], [0], [1
+])
+AT_CHECK([grep -c 'p1\" && eth.src == 00:00:00:00:ff:01' before_mig_flows], [0], [1
+])
+
+ch2_uuid=$(fetch_column Chassis _uuid name=ch2)
+
+check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
+check ovn-sbctl set Port_Binding p1 additional_chassis=$ch2_uuid
+check ovn-nbctl --wait=sb sync
+check_recompute_counter 0 0
+
+ovn-sbctl dump-flows sw0 > mid_mig_flows
+AT_CAPTURE_FILE([mid_mig_flows])
+# FDB learning must be gated off for p1 while migrating.
+AT_CHECK([grep -c 'ls_in_lookup_fdb.*inport == \"p1\"' mid_mig_flows], [1], [0
+])
+# Anti-gateway-MAC-spoofing flow for p1 must still be present mid-migration.
+AT_CHECK([grep -c 'p1\" && eth.src == 00:00:00:00:ff:01' mid_mig_flows], [0], [1
+])
+
+check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
+check ovn-sbctl clear Port_Binding p1 additional_chassis
+check ovn-nbctl --wait=sb sync
+check_recompute_counter 0 0
+
+ovn-sbctl dump-flows sw0 > after_mig_flows
+AT_CAPTURE_FILE([after_mig_flows])
+# FDB learning must resume for p1 once migration ends.
+AT_CHECK([grep -c 'ls_in_lookup_fdb.*inport == \"p1\"' after_mig_flows], [0], [1
+])
+AT_CHECK([grep -c 'p1\" && eth.src == 00:00:00:00:ff:01' after_mig_flows], [0], [1
+])
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD_NO_HV([
+AT_SETUP([PCD-4343 simultaneous SB migration and NB deletion])
+ovn_start
+
+check_recompute_counter() {
+    northd_recomp=$(as northd ovn-appctl -t ovn-northd inc-engine/show-stats northd recompute)
+    AT_CHECK([test x$northd_recomp = x$1])
+    lflow_recomp=$(as northd ovn-appctl -t ovn-northd inc-engine/show-stats lflow recompute)
+    AT_CHECK([test x$lflow_recomp = x$2])
+}
+
+check ovn-nbctl --wait=sb ls-add sw0
+check ovn-nbctl --wait=sb -- lsp-add sw0 p1 -- lsp-set-addresses p1 "aa:aa:aa:00:00:01 10.0.0.5"
+
+check ovn-sbctl chassis-add ch1 geneve 127.0.0.1
+check ovn-sbctl chassis-add ch2 geneve 127.0.0.2
+check ovn-sbctl lsp-bind p1 ch1
+check ovn-nbctl --wait=sb sync
+
+ch2_uuid=$(fetch_column Chassis _uuid name=ch2)
+
+check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
+
+# Suspend northd (SIGSTOP, not the northd-specific "pause" unixctl command -
+# that one drops and reacquires the SB lock on resume, which by itself
+# forces a full recompute and would mask the bug under test) so the SB
+# migration update (additional_chassis) and the NB deletion of the same
+# port land in the SAME engine iteration once it wakes. That's the
+# scenario where northd_handle_sb_port_binding_changes() (which runs
+# before the NB logical switch handler, see inc-proc-northd.c) could add
+# the port to trk_lsps.updated just before the NB handler adds it to
+# trk_lsps.deleted.
+sleep_northd
+
+check ovn-sbctl set Port_Binding p1 additional_chassis=$ch2_uuid
+check ovn-nbctl lsp-del p1
+
+wake_up_northd
+wait_row_count Port_Binding 0 logical_port=p1
+
+# Deletion must still be handled incrementally (not masked by a fallback
+# to full recompute, which would hide the bug under test).
+check_recompute_counter 0 0
+
+# p1's flows must not be resurrected after the port was deleted.
+AT_CHECK([ovn-sbctl dump-flows sw0 | grep -c '"p1"'], [1], [0
+])
+
+AT_CLEANUP
+])

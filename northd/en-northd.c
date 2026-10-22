@@ -169,8 +169,13 @@ northd_sb_port_binding_handler(struct engine_node *node,
     northd_get_input_data(node, &input_data);
 
     if (!northd_handle_sb_port_binding_changes(
-        input_data.sbrec_port_binding_table, &nd->ls_ports, &nd->lr_ports)) {
+        input_data.sbrec_port_binding_table, nd,
+        input_data.sbrec_fdb_by_dp_and_port)) {
         return false;
+    }
+
+    if (northd_has_tracked_data(&nd->trk_data)) {
+        engine_set_node_state(node, EN_UPDATED);
     }
 
     return true;

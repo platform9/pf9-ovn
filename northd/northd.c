@@ -4714,6 +4714,22 @@ ls_handle_lsp_changes(struct ovsdb_idl_txn *ovnsb_idl_txn,
                 goto fail;
             }
             add_op_to_northd_tracked_ports(&trk_lsps->deleted, op);
+            /* PF9: 'op' may already be in trk_lsps->updated from this same
+             * engine iteration - northd_handle_sb_port_binding_changes()
+             * (en_sb_port_binding's change handler) runs before this
+             * handler (en_nb_logical_switch's) within en_northd, see
+             * inc-proc-northd.c, so a migration's additional_chassis
+             * change and this port's NB deletion can land in the same
+             * cycle. Deletion must win: lflow_handle_northd_port_changes()
+             * processes trk_lsps->deleted before trk_lsps->updated, and
+             * leaving 'op' in both doesn't just resurrect flows for a
+             * torn-down port - it crashes ovn-northd. The updated-loop's
+             * lflow_ref_sync_lflows() ends up writing to the very SB rows
+             * (op->sb's Port_Binding/Logical_Flow references) deleted just
+             * above in this same transaction, hitting
+             * "assertion row->new_datum != NULL failed in
+             * ovsdb_idl_txn_write__()" (confirmed by reproduction). */
+            hmapx_find_and_delete(&trk_lsps->updated, op);
             hmap_remove(&nd->ls_ports, &op->key_node);
             hmap_remove(&od->ports, &op->dp_node);
             sbrec_port_binding_delete(op->sb);
@@ -4959,9 +4975,12 @@ fail:
 bool
 northd_handle_sb_port_binding_changes(
     const struct sbrec_port_binding_table *sbrec_port_binding_table,
-    struct hmap *ls_ports, struct hmap *lr_ports,
+    struct northd_data *nd,
     struct ovsdb_idl_index *sbrec_fdb_by_dp_and_port)
 {
+    struct hmap *ls_ports = &nd->ls_ports;
+    struct hmap *lr_ports = &nd->lr_ports;
+    struct northd_tracked_data *trk_data = &nd->trk_data;
     const struct sbrec_port_binding *pb;
     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
     SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (pb, sbrec_port_binding_table) {
@@ -4995,6 +5014,7 @@ northd_handle_sb_port_binding_changes(
                 VLOG_WARN_RL(&rl, "A port-binding for %s is created but the "
                             "%s is not found.", pb->logical_port,
                             is_router_port ? "LRP" : "LSP");
+                destroy_northd_data_tracked_changes(nd);
                 return false;
             }
             op->sb = pb;
@@ -5006,6 +5026,7 @@ northd_handle_sb_port_binding_changes(
             if (op && op->sb == pb) {
                 VLOG_WARN_RL(&rl, "A port-binding for %s is deleted but the "
                             "LSP/LRP still exists.", pb->logical_port);
+                destroy_northd_data_tracked_changes(nd);
                 return false;
             }
         } else {
@@ -5027,11 +5048,13 @@ northd_handle_sb_port_binding_changes(
                 VLOG_WARN_RL(&rl, "A port-binding for %s is updated but the "
                             "%s is not found.", pb->logical_port,
                             is_router_port ? "LRP" : "LSP");
+                destroy_northd_data_tracked_changes(nd);
                 return false;
             }
             if (op->sb != pb) {
                 VLOG_WARN_RL(&rl, "A port-binding for %s is updated with a new"
                              "IDL row, which is unusual.", pb->logical_port);
+                destroy_northd_data_tracked_changes(nd);
                 return false;
             }
 
@@ -5071,16 +5094,30 @@ northd_handle_sb_port_binding_changes(
              *     learning flows were omitted and would otherwise never come
              *     back, leaving unknown-destination traffic flooding
              *     instead of being learned, indefinitely.
-             * Force a full recompute so build_lswitch_learn_fdb_op() is
-             * re-evaluated for this port (and everything else) right now,
-             * in both directions. Migrations are rare enough that this is
-             * cheap insurance, not a hot path. */
-            if (sbrec_port_binding_is_updated(
+             * build_lswitch_learn_fdb_op() needs to be re-evaluated for this
+             * port right now, in both directions - but a VM live migration
+             * is not rare at scale (DRR rebalancing and host evacuation can
+             * drive many of these), and each one flips this field twice
+             * (migration start and end), so forcing a full recompute here
+             * turns every migration into two cluster-wide logical-flow
+             * rebuilds. Mark just this one port as updated instead, the
+             * same way northd_handle_ls_changes() does for NB-triggered LSP
+             * changes: lflow_handle_northd_port_changes() will re-derive
+             * only this port's flows (including build_lswitch_learn_fdb_op())
+             * via build_lswitch_and_lrouter_iterate_by_lsp() and sync them
+             * through op->lflow_ref, with no full-table recompute. */
+            if (!is_router_port && op->nbsp &&
+                sbrec_port_binding_is_updated(
                     pb, SBREC_PORT_BINDING_COL_ADDITIONAL_CHASSIS)) {
-                return false;
+                hmapx_add(&trk_data->trk_lsps.updated, op);
             }
         }
     }
+
+    if (!hmapx_is_empty(&trk_data->trk_lsps.updated)) {
+        trk_data->type |= NORTHD_TRACKED_PORTS;
+    }
+
     return true;
 }
 
@@ -8295,20 +8332,21 @@ port_is_fdb_learning_vif(const struct ovn_port *op)
  * migration-aware FDB handling in build_lswitch_learn_fdb_op() and
  * northd_handle_sb_port_binding_changes() instead.
  *
- * This is only called from the full-lflow-build path (see the "l2_only
- * ports" loop below), not from the per-LSP incremental path
- * (build_lswitch_and_lrouter_iterate_by_lsp()) - flows are attributed to
- * p->lflow_ref so they are correctly owned/replaced whenever that *is* the
- * case, but today it never actually is: lsp_can_be_inc_processed() already
- * refuses incremental processing for any port with "unknown" in its
- * addresses (the precondition for port_is_fdb_learning_vif() to be true at
- * all), and lr_changes_can_be_handled() already falls back to a full
- * recompute for any change to a router port (covering a protected MAC
- * changing or a router port being added/removed). So a stale flow here
- * would require a change to either side that *isn't* already forcing a
- * full recompute for an unrelated reason - not possible today, but worth
- * re-checking if either of those exclusions is ever relaxed (both have XXX
- * comments noting they're known, deliberate limitations). */
+ * Called from build_lswitch_and_lrouter_iterate_by_lsp(), i.e. on both the
+ * full-lflow-build path and the per-LSP incremental path
+ * (lflow_handle_northd_port_changes()) - flows are attributed to
+ * p->lflow_ref so they are correctly owned/replaced on either path.
+ *
+ * This must stay reachable from the incremental path: northd_handle_sb_
+ * port_binding_changes() marks a port as incrementally-updated (instead of
+ * forcing a full recompute) whenever its additional_chassis changes, which
+ * happens on every live migration of exactly this kind of port (port
+ * security off + "unknown" addressing is the common case for migrating
+ * workloads here). If this function were only called from the full-rebuild
+ * "l2_only ports" loop, lflow_handle_northd_port_changes()'s
+ * lflow_ref_unlink_lflows()+rebuild for that port would silently drop these
+ * two flows on every migration and never restore them - reopening the exact
+ * gateway-MAC-spoofing hole this function exists to close. */
 static void
 add_known_mac_spoofing_prevention(struct ovn_port *p,
                                   struct lflow_table *lflows)
@@ -16196,6 +16234,10 @@ build_lswitch_and_lrouter_iterate_by_lsp(struct ovn_port *op,
     /* Build Logical Switch Flows. */
     build_lswitch_port_sec_op(op, lflows, actions, match);
     build_lswitch_learn_fdb_op(op, lflows, actions, match);
+    /* Applies to any FDB-learning VIF, not just l2-only ones; must run on
+     * both the full rebuild and the per-LSP incremental path - see the
+     * comment on add_known_mac_spoofing_prevention() for why. */
+    add_known_mac_spoofing_prevention(op, lflows);
     build_lswitch_arp_nd_responder_skip_local(op, lflows, match);
     build_lswitch_arp_nd_responder_known_ips(op, lflows, ls_ports,
                                              meter_groups, actions, match);
@@ -16572,8 +16614,10 @@ build_lswitch_and_lrouter_flows(
                 continue;
             }
 
-            /* Applies to any FDB-learning VIF, not just l2-only ones. */
-            add_known_mac_spoofing_prevention(op, lsi.lflows);
+            /* add_known_mac_spoofing_prevention() now runs for every port
+             * from build_lswitch_and_lrouter_iterate_by_lsp() above (so it
+             * also covers the per-LSP incremental path), so it is not
+             * called again here. */
 
             if (!port_is_l2_only_port(op)) {
                 VLOG_DBG("port is not l2_only, skipping.");

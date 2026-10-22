@@ -700,8 +700,8 @@ bool lflow_handle_ls_stateful_changes(struct ovsdb_idl_txn *,
                                       struct lflow_input *,
                                       struct lflow_table *lflows);
 bool northd_handle_sb_port_binding_changes(
-    const struct sbrec_port_binding_table *, struct hmap *ls_ports,
-    struct hmap *lr_ports, struct ovsdb_idl_index *sbrec_fdb_by_dp_and_port);
+    const struct sbrec_port_binding_table *, struct northd_data *,
+    struct ovsdb_idl_index *sbrec_fdb_by_dp_and_port);
 
 struct tracked_lb_data;
 bool northd_handle_lb_data_changes(struct tracked_lb_data *,

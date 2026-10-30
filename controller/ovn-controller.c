@@ -47,6 +47,7 @@
 #include "lport.h"
 #include "memory.h"
 #include "ofctrl.h"
+#include "ofctrl-wait-before-clear.h"
 #include "ofctrl-seqno.h"
 #include "openvswitch/vconn.h"
 #include "openvswitch/vlog.h"
@@ -6169,6 +6170,21 @@ main(int argc, char *argv[])
                     lflow_output_data = engine_get_data(&en_lflow_output);
                     pflow_output_data = engine_get_data(&en_pflow_output);
                     lb_data = engine_get_data(&en_lb_data);
+                    /* Lets ofctrl's S_WAIT_BEFORE_CLEAR state clear existing
+                     * flows as soon as a complete flow table is actually
+                     * available, rather than always idling out the full
+                     * ovn-ofctrl-wait-before-clear timer. The seqno pair
+                     * matters because update_sb_monitors() above, earlier in
+                     * this same iteration, can have just widened the
+                     * expected one - see ofctrl_initial_flows_ready() for why
+                     * non-null outputs alone would be a partial table. */
+                    ofctrl_set_initial_flows_ready(
+                        ofctrl_initial_flows_ready(lflow_output_data != NULL,
+                                                   pflow_output_data != NULL,
+                                                   ct_zones_data != NULL,
+                                                   lb_data != NULL,
+                                                   ovnsb_cond_seqno,
+                                                   ovnsb_expected_cond_seqno));
                     if (lflow_output_data && pflow_output_data &&
                         ct_zones_data && lb_data) {
                         stopwatch_start(OFCTRL_PUT_STOPWATCH_NAME,
@@ -6341,7 +6357,12 @@ loop_done:
     engine_cleanup();
 
     /* It's time to exit.  Clean up the databases if we are not restarting */
-    if (!exit_args.restart) {
+    if (exit_args.restart) {
+        VLOG_INFO("Exiting with --restart: leaving Chassis row, port bindings "
+                  "and tunnel ports in place for the next ovn-controller.");
+    } else {
+        VLOG_INFO("Exiting without --restart: releasing port bindings, "
+                  "deleting Chassis row and removing tunnel ports.");
         bool done = !ovsdb_idl_has_ever_connected(ovnsb_idl_loop.idl);
         while (!done) {
             update_sb_db(ovs_idl_loop.idl, ovnsb_idl_loop.idl,
@@ -6391,6 +6412,7 @@ loop_done:
             ovsdb_idl_loop_commit_and_wait(&ovs_idl_loop);
             poll_block();
         }
+        VLOG_INFO("Southbound and OVS database cleanup complete.");
     }
 
     free(ovn_version);

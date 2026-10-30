@@ -1,7 +1,9 @@
 EXTRA_DIST += \
 	build-aux/automake.mk \
     build-aux/build-common.sh \
+    build-aux/build-common-version-test.sh \
     build-aux/build-debs.sh \
+    tests/ovn-host-prerm-cleanup-test.sh \
 	build-aux/calculate-pipeline-cksum \
     build-aux/build-rpms.sh \
 	build-aux/build-container-publish.sh \

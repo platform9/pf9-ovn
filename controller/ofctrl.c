@@ -24,6 +24,7 @@
 #include "hindex.h"
 #include "lflow.h"
 #include "ofctrl.h"
+#include "ofctrl-wait-before-clear.h"
 #include "openflow/openflow.h"
 #include "openvswitch/dynamic-string.h"
 #include "openvswitch/hmap.h"
@@ -354,6 +355,14 @@ static unsigned int wait_before_clear_time = 0;
  * If the timer is not started yet, it is set to 0. */
 static long long int wait_before_clear_expire = 0;
 
+/* Set by ofctrl_set_initial_flows_ready() once the engine has produced a
+ * complete initial lflow/pflow table after a (re)connect. Lets
+ * run_S_WAIT_BEFORE_CLEAR() clear existing flows as soon as the new ones are
+ * genuinely ready, instead of always idling out the full
+ * ovn-ofctrl-wait-before-clear timer - that timer remains a ceiling for the
+ * case flow computation is slow or never completes, not a fixed floor. */
+static bool initial_flows_ready = false;
+
 /* Transaction IDs for messages in flight to the switch. */
 static ovs_be32 xid, xid2;
 
@@ -631,18 +640,62 @@ error:
 static void
 run_S_WAIT_BEFORE_CLEAR(void)
 {
-    if (!wait_before_clear_time ||
-        (wait_before_clear_expire &&
-         time_msec() >= wait_before_clear_expire)) {
+    enum ofctrl_wait_before_clear_reason reason =
+        ofctrl_wait_before_clear_decide(initial_flows_ready,
+                                         wait_before_clear_time,
+                                         wait_before_clear_expire,
+                                         time_msec());
+    switch (reason) {
+    case OFCTRL_WBC_DISABLED:
+        VLOG_INFO("ofctrl-wait-before-clear is 0 ms: existing flows will "
+                  "be cleared as soon as the new ones are ready.");
         state = S_CLEAR_FLOWS;
         return;
+    case OFCTRL_WBC_EXPIRED:
+        VLOG_INFO("ofctrl-wait-before-clear (%u ms) expired: existing "
+                  "flows will now be cleared.", wait_before_clear_time);
+        state = S_CLEAR_FLOWS;
+        return;
+    case OFCTRL_WBC_FLOWS_READY:
+        VLOG_INFO("Initial flow computation finished early (within %u ms "
+                  "ofctrl-wait-before-clear budget): clearing existing "
+                  "flows now.", wait_before_clear_time);
+        state = S_CLEAR_FLOWS;
+        return;
+    case OFCTRL_WBC_STILL_WAITING:
+        break;
     }
 
     if (!wait_before_clear_expire) {
         /* Start the timer. */
         wait_before_clear_expire = time_msec() + wait_before_clear_time;
+        VLOG_INFO("Holding existing flows for up to %u ms while the new flow "
+                  "table is computed (ofctrl-wait-before-clear).",
+                  wait_before_clear_time);
     }
     poll_timer_wait_until(wait_before_clear_expire);
+}
+
+/* Called (from ovn-controller.c's main loop) with 'ready' true once the
+ * engine has produced a complete initial lflow/pflow table after a
+ * (re)connect, so run_S_WAIT_BEFORE_CLEAR() can stop holding existing flows
+ * as soon as the new ones are actually ready instead of always waiting out
+ * the full ovn-ofctrl-wait-before-clear timer. */
+void
+ofctrl_set_initial_flows_ready(bool ready)
+{
+    /* Becoming ready is itself new information the run loop needs to act
+     * on: without an immediate wake here, a quiet controller sitting in
+     * poll_block() (nothing else pending) would wait for some unrelated
+     * event or the wait-before-clear timer itself before run_S_WAIT_
+     * BEFORE_CLEAR() ever gets another chance to notice and install the
+     * now-ready flows - silently reintroducing the delay this early-exit
+     * exists to avoid. Only the false->true edge needs this: once ready,
+     * nothing here changes again until a reconnect resets it. */
+    if (ready && !initial_flows_ready) {
+        poll_immediate_wake();
+    }
+    initial_flows_ready = ready;
 }
 
 static void
@@ -794,6 +847,18 @@ ofctrl_run(const struct ovsrec_bridge *br_int,
         seqno = rconn_get_connection_seqno(swconn);
         reconnected = true;
         state = S_NEW;
+
+        /* wait_before_clear_expire/initial_flows_ready guard the *next* pass
+         * through S_WAIT_BEFORE_CLEAR, which this reconnect is about to
+         * re-enter (via S_TLV_TABLE_REQUESTED). Both are static for the life
+         * of the process, so without resetting them here, only the first
+         * reconnect ever gets a fresh ovn-ofctrl-wait-before-clear budget: any
+         * later reconnect - e.g. a second OVS restart while ovn-controller
+         * itself keeps running - would see the deadline from the *first*
+         * reconnect, already long past, and OFCTRL_WBC_EXPIRED would clear
+         * existing flows immediately with no grace period at all. */
+        wait_before_clear_expire = 0;
+        initial_flows_ready = false;
 
         /* Reset the state of any outstanding ct flushes to resend them. */
         struct shash_node *iter;
@@ -2766,6 +2831,9 @@ ofctrl_put(struct ovn_desired_flow_table *lflow_table,
     ovs_list_push_back(&msgs, &bundle_open->list_node);
 
     if (ofctrl_initial_clear) {
+        VLOG_INFO("Clearing all existing flows and groups in the integration "
+                  "bridge; the recomputed flow table is installed in the same "
+                  "OpenFlow bundle.");
         /* Send a flow_mod to delete all flows. */
         struct ofputil_flow_mod fm = {
             .table_id = OFPTT_ALL,

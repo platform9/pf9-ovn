@@ -50,9 +50,10 @@ printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-pf9" > $TEAMCITY_ROOT/ovn-deb-versio
 export PF9_OVN_SHA
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
-# configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
 sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/changelog"
 
+# configure.ac gets the dot-separated version the binaries report
+# (ovn-appctl version); unrelated to the package version above
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
@@ -131,36 +132,20 @@ rm -f build-aux/ltmain.sh
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
 
-# --- VERIFY the Pf9-Source-Sha stamp and the northd/controller version ---
-# 1. Every OVN deb must carry the pf9-ovn commit as Pf9-Source-Sha; pf9-apt
-#    refuses to replace an installed package with an unstamped one.
-# 2. ovn-controller (ovn-host) and ovn-northd (ovn-central, run in the DU's
-#    pf9-ovn container) must report the SAME version string, derived from the
-#    commit. Hosts run with ovn-match-northd-version=true, and the DU is
-#    upgraded before its hosts, so a controller/northd mismatch here would
-#    stop hosts programming flows after their upgrade.
-EXPECTED_BIN_VERSION="${OVN_BASE}.pf9.${PF9_OVN_SHA:0:12}"
-VERIFY_DIR=$(mktemp -d)
+# --- VERIFY the Pf9-Source-Sha stamp ---
+# Every OVN deb must carry the pf9-ovn commit as Pf9-Source-Sha; pf9-apt
+# refuses to replace an installed package with an unstamped one.
+VERIFY_SHA_FAIL=0
 for pkg in ovn-common ovn-host ovn-central; do
     deb=$(ls "$TEAMCITY_ROOT"/${pkg}_*.deb | head -1)
     got_sha=$(dpkg-deb -f "$deb" Pf9-Source-Sha)
     if [ "$got_sha" != "$PF9_OVN_SHA" ]; then
         echo "FATAL: $(basename "$deb") Pf9-Source-Sha='$got_sha', expected '$PF9_OVN_SHA'"
-        exit 1
-    fi
-    dpkg-deb -x "$deb" "$VERIFY_DIR"
-done
-for bin in ovn-controller ovn-northd; do
-    path=$(find "$VERIFY_DIR" -type f -name "$bin" | head -1)
-    [ -n "$path" ] || { echo "FATAL: $bin not found in the built debs"; exit 1; }
-    if ! grep -qaF "$EXPECTED_BIN_VERSION" "$path" \
-       && ! grep -rqaF "$EXPECTED_BIN_VERSION" "$VERIFY_DIR"/usr/lib 2>/dev/null; then
-        echo "FATAL: $bin does not embed version '$EXPECTED_BIN_VERSION'"
-        exit 1
+        VERIFY_SHA_FAIL=1
     fi
 done
-echo "Verified: Pf9-Source-Sha=${PF9_OVN_SHA:0:12} on ovn-common/ovn-host/ovn-central; controller and northd embed $EXPECTED_BIN_VERSION"
-rm -rf "$VERIFY_DIR"
+[ "$VERIFY_SHA_FAIL" = 0 ] || exit 1
+echo "Verified: Pf9-Source-Sha=${PF9_OVN_SHA:0:12} on ovn-common/ovn-host/ovn-central"
 
 # Remove bloat packages before artifact collection
 find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \

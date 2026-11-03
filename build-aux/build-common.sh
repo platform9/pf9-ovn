@@ -40,19 +40,15 @@ pf9_patch_ovn_binary_version() {
     fi
 
     # Dots throughout, no epoch, no OS suffix — identical on all platforms.
-    # configure.ac carries this into OVN_PACKAGE_VERSION and thus the version
-    # that ovn-controller (hosts) and ovn-northd (the DU's pf9-ovn container)
-    # compare under ovn-match-northd-version=true.
+    # configure.ac carries this into OVN_PACKAGE_VERSION and thus ovn-appctl version.
     #
-    # Derived from the pf9-ovn commit ONLY - no build number, no PF9_VERSION.
-    # pf9-apt decides whether to replace the installed ovn packages by the
-    # Pf9-Source-Sha deb field, i.e. by commit. If this string also changed on
-    # every rebuild of the same commit, a host that (correctly) skips the
-    # reinstall would keep reporting an older version than a freshly rebuilt
-    # northd and the version match would fail. One commit -> one version string
-    # for northd and every host.
-    PF9_OVN_SHA=${PF9_OVN_SHA:-$(git -C "$ROOT" rev-parse HEAD)} || return 1
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_OVN_SHA:0:12}
+    # This still carries PF9_VERSION and BUILD_NUMBER: it is only the version
+    # the binaries report. It is NOT what pf9-apt/pf9-yum compare (they use the
+    # static package version plus the Pf9-Source-Sha stamp), and it does not
+    # affect ovn-match-northd-version: ovn_version_base() in
+    # controller/ovn-controller.c (PCD-8825) strips the ".pf9.<...>" part from
+    # both the controller and northd versions before comparing them.
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 

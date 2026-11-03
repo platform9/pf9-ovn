@@ -35,10 +35,10 @@ URL: http://www.ovn.org/
 # rpm orders a static "24.03.6.pf9" BELOW existing build-numbered installs such
 # as "24.03.6.pf9.2026.12.0.609" (the longer version string wins).
 Epoch: 2
-# @VERSION@ is the tarball/binary version (OVN_PACKAGE_VERSION, which embeds
-# the commit SHA so ovn-controller and ovn-northd agree for
-# ovn-match-northd-version); the package Version is passed in static via
-# --define 'pf9_rpm_version ...'. Without the define they are the same.
+# @VERSION@ is the tarball/binary version (OVN_PACKAGE_VERSION, which still
+# carries the PF9 version and build number); the package Version is passed in
+# static via --define 'pf9_rpm_version ...' so it does not change per build.
+# Without the define they are the same.
 %define pf9_src_version @VERSION@
 Version: %{?pf9_rpm_version}%{!?pf9_rpm_version:@VERSION@}
 # pf9: the commit this package was built from (--define 'pf9_source_sha <sha>')

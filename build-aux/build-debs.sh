@@ -30,9 +30,24 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
     exit 1
 fi
 
+# --- VERSIONING ---
+# Epoch 2, no build counter: the deb version is static per base version and OS.
+# Whether an installed package is replaced is decided by pf9-apt from the
+# Pf9-Source-Sha deb field (the commit the package was built from), not by
+# the version string. Epoch 2 is required because dpkg orders a static
+# "24.03.6-pf9+u22" BELOW every existing build-numbered install such as
+# "24.03.6-pf9-2026.12.0-609+u22" (a shorter upstream_version sorts lower);
+# without it, hosts on an old build-numbered package would never upgrade.
+PF9_PKG_EPOCH=2
+
 # --- OVN CONFIGURATION ---
-PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
-printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
+PF9_OVN_SHA=$(git -C "$ROOT" rev-parse HEAD) || {
+    echo "Unable to determine the pf9-ovn commit"
+    exit 1
+}
+PF9_OVN_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVN_BASE}-pf9+${UBUNTU_VERSION}
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-pf9" > $TEAMCITY_ROOT/ovn-deb-version.txt
+export PF9_OVN_SHA
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -41,11 +56,11 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/chan
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes.
-# Epoch 1 beats upstream; omitting build counter means existing CI-versioned
-# installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
-printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+# Static version (no build counter), stamped with Pf9-Source-Sha at build time
+# (pf9-ovs debian/rules). See the epoch note above.
+PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9+${UBUNTU_VERSION}
+PF9_OVS_PKG_EVR=$PF9_OVS_BUILD_VERSION   # OVS cache key (see pf9_pack_ovs_cache)
+printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
@@ -55,7 +70,7 @@ EXPECTED_OVS_SHA=$(git -C "$ROOT" rev-parse HEAD:ovs) || {
     exit 1
 }
 
-if pf9_restore_ovs_cache "$UBUNTU_VERSION" "$EXPECTED_OVS_SHA"; then
+if pf9_restore_ovs_cache "$UBUNTU_VERSION" "$EXPECTED_OVS_SHA" "$PF9_OVS_PKG_EVR"; then
     echo "OVS: using cached build tree"
 else
     echo "OVS: building from source"
@@ -66,14 +81,17 @@ else
 
     # Python setuptools sanitization (PEP 440)
     # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^[0-9]*://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
     sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
 
     # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
     # Since we build in $ROOT/ovs, debs land in $ROOT.
     ( cd "$ROOT/ovs" && ./boot.sh )
     ( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
-    ( cd "$ROOT/ovs" && make debian && make debian-deb)
+    # Stamp the pf9-ovs commit into the debs as 'Pf9-Source-Sha' (see
+    # pf9-ovs debian/rules). pf9-apt uses it to decide whether an OVS package
+    # with an unchanged version string still needs upgrading.
+    ( cd "$ROOT/ovs" && PF9_OVS_SHA="$EXPECTED_OVS_SHA" make debian && PF9_OVS_SHA="$EXPECTED_OVS_SHA" make debian-deb)
 
     pf9_pack_ovs_cache "$UBUNTU_VERSION"
 fi
@@ -112,6 +130,37 @@ rm -f build-aux/ltmain.sh
 
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
+
+# --- VERIFY the Pf9-Source-Sha stamp and the northd/controller version ---
+# 1. Every OVN deb must carry the pf9-ovn commit as Pf9-Source-Sha; pf9-apt
+#    refuses to replace an installed package with an unstamped one.
+# 2. ovn-controller (ovn-host) and ovn-northd (ovn-central, run in the DU's
+#    pf9-ovn container) must report the SAME version string, derived from the
+#    commit. Hosts run with ovn-match-northd-version=true, and the DU is
+#    upgraded before its hosts, so a controller/northd mismatch here would
+#    stop hosts programming flows after their upgrade.
+EXPECTED_BIN_VERSION="${OVN_BASE}.pf9.${PF9_OVN_SHA:0:12}"
+VERIFY_DIR=$(mktemp -d)
+for pkg in ovn-common ovn-host ovn-central; do
+    deb=$(ls "$TEAMCITY_ROOT"/${pkg}_*.deb | head -1)
+    got_sha=$(dpkg-deb -f "$deb" Pf9-Source-Sha)
+    if [ "$got_sha" != "$PF9_OVN_SHA" ]; then
+        echo "FATAL: $(basename "$deb") Pf9-Source-Sha='$got_sha', expected '$PF9_OVN_SHA'"
+        exit 1
+    fi
+    dpkg-deb -x "$deb" "$VERIFY_DIR"
+done
+for bin in ovn-controller ovn-northd; do
+    path=$(find "$VERIFY_DIR" -type f -name "$bin" | head -1)
+    [ -n "$path" ] || { echo "FATAL: $bin not found in the built debs"; exit 1; }
+    if ! grep -qaF "$EXPECTED_BIN_VERSION" "$path" \
+       && ! grep -rqaF "$EXPECTED_BIN_VERSION" "$VERIFY_DIR"/usr/lib 2>/dev/null; then
+        echo "FATAL: $bin does not embed version '$EXPECTED_BIN_VERSION'"
+        exit 1
+    fi
+done
+echo "Verified: Pf9-Source-Sha=${PF9_OVN_SHA:0:12} on ovn-common/ovn-host/ovn-central; controller and northd embed $EXPECTED_BIN_VERSION"
+rm -rf "$VERIFY_DIR"
 
 # Remove bloat packages before artifact collection
 find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \

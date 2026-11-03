@@ -29,8 +29,20 @@ Name: ovn
 Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
-Epoch: 1
-Version: @VERSION@
+# pf9: epoch 2 + a static package Version (no build counter). Whether an
+# installed package is replaced is decided by pf9-yum from the
+# pf9-source-sha() provide below, not by version. Epoch 2 is required because
+# rpm orders a static "24.03.6.pf9" BELOW existing build-numbered installs such
+# as "24.03.6.pf9.2026.12.0.609" (the longer version string wins).
+Epoch: 2
+# @VERSION@ is the tarball/binary version (OVN_PACKAGE_VERSION, which embeds
+# the commit SHA so ovn-controller and ovn-northd agree for
+# ovn-match-northd-version); the package Version is passed in static via
+# --define 'pf9_rpm_version ...'. Without the define they are the same.
+%define pf9_src_version @VERSION@
+Version: %{?pf9_rpm_version}%{!?pf9_rpm_version:@VERSION@}
+# pf9: the commit this package was built from (--define 'pf9_source_sha <sha>')
+%{?pf9_source_sha:Provides: pf9-source-sha(%{pf9_source_sha})}
 Obsoletes: openvswitch-ovn-common < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 
@@ -44,7 +56,7 @@ Provides: openvswitch-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 # lib/sflow*.[ch] files are SISSL
 License: ASL 2.0 and LGPLv2+ and SISSL
 Release: 1%{?dist}
-Source: http://openvswitch.org/releases/ovn-%{version}.tar.gz
+Source: http://openvswitch.org/releases/ovn-%{pf9_src_version}.tar.gz
 Source10: http://openvswitch.org/releases/openvswitch-%{ovsver}.tar.gz
 
 BuildRequires: gcc gcc-c++
@@ -85,6 +97,7 @@ Requires: ovn
 Requires: firewalld-filesystem
 Obsoletes: openvswitch-ovn-central < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-central = %{?epoch:%{epoch}:}%{version}-%{release}
+%{?pf9_source_sha:Provides: pf9-source-sha(%{pf9_source_sha})}
 
 %description central
 OVN DB servers and ovn-northd running on a central node.
@@ -96,6 +109,7 @@ Requires: ovn
 Requires: firewalld-filesystem
 Obsoletes: openvswitch-ovn-host < %{?epoch:%{epoch}:}%{version}-%{release}
 Provides: openvswitch-ovn-host = %{?epoch:%{epoch}:}%{version}-%{release}
+%{?pf9_source_sha:Provides: pf9-source-sha(%{pf9_source_sha})}
 
 %description host
 OVN controller running on each host.
@@ -121,7 +135,7 @@ Provides: openvswitch-ovn-docker = %{?epoch:%{epoch}:}%{version}-%{release}
 Docker network plugins for OVN.
 
 %prep
-%autosetup -n ovn-%{version} -a 10 -p 1
+%autosetup -n ovn-%{pf9_src_version} -a 10 -p 1
 
 
 %build

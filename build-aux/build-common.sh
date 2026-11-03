@@ -40,8 +40,19 @@ pf9_patch_ovn_binary_version() {
     fi
 
     # Dots throughout, no epoch, no OS suffix — identical on all platforms.
-    # configure.ac carries this into OVN_PACKAGE_VERSION and thus ovn-appctl version.
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
+    # configure.ac carries this into OVN_PACKAGE_VERSION and thus the version
+    # that ovn-controller (hosts) and ovn-northd (the DU's pf9-ovn container)
+    # compare under ovn-match-northd-version=true.
+    #
+    # Derived from the pf9-ovn commit ONLY - no build number, no PF9_VERSION.
+    # pf9-apt decides whether to replace the installed ovn packages by the
+    # Pf9-Source-Sha deb field, i.e. by commit. If this string also changed on
+    # every rebuild of the same commit, a host that (correctly) skips the
+    # reinstall would keep reporting an older version than a freshly rebuilt
+    # northd and the version match would fail. One commit -> one version string
+    # for northd and every host.
+    PF9_OVN_SHA=${PF9_OVN_SHA:-$(git -C "$ROOT" rev-parse HEAD)} || return 1
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_OVN_SHA:0:12}
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 
@@ -79,7 +90,7 @@ pf9_build_reset() {
 #   pf9-ovn/ovs/                          whole tree incl. _debian/ or rpm/
 #                                         (ovs/.git excluded: a fresh
 #                                         checkout has its own git metadata)
-#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_SHA= BUILT_AT=
+#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_VER= OVS_SHA= BUILT_AT=
 #   pf9-ovn/openvswitch-*.deb
 #   pf9-ovn/python3-openvswitch_*.deb     deb only (make debian-deb drops them
 #                                         in $ROOT, the parent of ovs/)
@@ -97,6 +108,7 @@ pf9_pack_ovs_cache() {
         echo "ROOT=$ROOT"
         echo "PLAT=$plat"
         echo "OVS_BASE=$OVS_BASE"
+        echo "OVS_VER=${PF9_OVS_PKG_EVR:-}"
         echo "OVS_SHA=$(git -C "$ROOT/ovs" rev-parse HEAD)"
         echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$meta"
@@ -126,10 +138,11 @@ pf9_pack_ovs_cache() {
     ls -lh "$tarball"
 }
 
-# pf9_restore_ovs_cache <plat> <expected_ovs_sha>
+# pf9_restore_ovs_cache <plat> <expected_ovs_sha> [expected_ovs_ver]
 # Returns 0 (and replaces $ROOT/ovs + OVS packages with the cached ones) only
 # if $TEAMCITY_ROOT/ovs-cache/ovs-build-<plat>.tar.gz exists and its
-# ROOT/PLAT/OVS_BASE/OVS_SHA all match the current values; returns 1 with a
+# ROOT/PLAT/OVS_BASE/OVS_SHA (and OVS_VER, when given) all match the current
+# values; returns 1 with a
 # reason otherwise, leaving $ROOT/ovs untouched so the caller can initialize
 # the submodule and build from source.
 #
@@ -143,9 +156,10 @@ pf9_restore_ovs_cache() {
 
     local plat="$1"
     local expected_ovs_sha="$2"
+    local expected_ovs_ver="${3:-}"
     local tarball="$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz"
     local tmp meta key val
-    local c_root="" c_plat="" c_base="" c_sha="" c_built=""
+    local c_root="" c_plat="" c_base="" c_ver="" c_sha="" c_built=""
 
     if [ ! -f "$tarball" ]; then
         echo "OVS cache: no tarball at $tarball -> building OVS from source"
@@ -179,17 +193,20 @@ pf9_restore_ovs_cache() {
             ROOT)     c_root="$val" ;;
             PLAT)     c_plat="$val" ;;
             OVS_BASE) c_base="$val" ;;
+            OVS_VER)  c_ver="$val" ;;
             OVS_SHA)  c_sha="$val" ;;
             BUILT_AT) c_built="$val" ;;
         esac
     done < "$meta"
 
     if [ "$c_root" != "$ROOT" ] || [ "$c_plat" != "$plat" ] \
-       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ]; then
+       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ] \
+       || { [ -n "$expected_ovs_ver" ] && [ "$c_ver" != "$expected_ovs_ver" ]; }; then
         echo "OVS cache: metadata mismatch -> building OVS from source"
         echo "  ROOT     cached='$c_root' current='$ROOT'"
         echo "  PLAT     cached='$c_plat' current='$plat'"
         echo "  OVS_BASE cached='$c_base' current='$OVS_BASE'"
+        echo "  OVS_VER  cached='$c_ver' current='$expected_ovs_ver'"
         echo "  OVS_SHA  cached='$c_sha' current='$expected_ovs_sha'"
         rm -rf "$tmp"
         return 1

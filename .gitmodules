@@ -1,4 +1,4 @@
 [submodule "ovs"]
 	path = ovs
 	url = git@github.com:platform9/pf9-ovs.git
-	branch = private/rutvik/debs-xz-compressed
+	branch = main

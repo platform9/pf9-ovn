@@ -24,6 +24,7 @@ run_patch() {
         PF9_OVN_VERSION="$pf9_ovn_version"
         PF9_VERSION="2026.9.0"
         BUILD_NUMBER="42"
+        PF9_OVN_SHA="${TEST_SHA:-0123456789abcdef0123456789abcdef01234567}"
         pf9_patch_ovn_binary_version
     )
 }
@@ -62,3 +63,23 @@ if run_patch "2026.9.0" > "$WORKDIR/out.txt" 2>&1; then
     exit 1
 fi
 echo "PASS: a PF9_OVN_VERSION missing its -v<version> suffix is also caught."
+
+# --- Part 4: binary version is derived from the commit SHA only ---
+# No build number and no PF9_VERSION: a rebuild of the same commit must yield
+# the identical string so ovn-controller and ovn-northd keep matching
+# (ovn-match-northd-version) when pf9-apt skips an unchanged package.
+printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+run_patch "2026.9.0-v24.03.6" >/dev/null 2>&1
+want="24.03.6.pf9.0123456789ab"
+if [ "$(cat "$ROOT/configure.ac")" != "$want" ]; then
+    echo "FAIL: binary version is '$(cat "$ROOT/configure.ac")', expected '$want'" >&2
+    exit 1
+fi
+printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+(cd "$WORKDIR"; ROOT="$ROOT"; . "$BUILD_COMMON"; PF9_OVN_VERSION="2026.9.0-v24.03.6"; PF9_VERSION="2027.1.0"; BUILD_NUMBER="999"; \
+    PF9_OVN_SHA="0123456789abcdef0123456789abcdef01234567"; pf9_patch_ovn_binary_version) >/dev/null 2>&1
+if [ "$(cat "$ROOT/configure.ac")" != "$want" ]; then
+    echo "FAIL: binary version changed with PF9_VERSION/BUILD_NUMBER: '$(cat "$ROOT/configure.ac")'" >&2
+    exit 1
+fi
+echo "PASS: binary version depends on the commit SHA only."

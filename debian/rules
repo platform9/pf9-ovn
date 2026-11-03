@@ -71,6 +71,18 @@ override_dh_installinit:
 override_dh_installsystemd:
 	dh_installsystemd --no-start
 
+# Stamp the pf9-ovn commit into every binary package as Pf9-Source-Sha.
+# pf9-apt compares it between the installed and incoming packages to decide
+# whether OVN needs replacing when the (static) version string is unchanged.
+# build-debs.sh exports PF9_OVN_SHA; if unset the field is omitted, which
+# pf9-apt treats as "not a SHA-stamped build".
+override_dh_gencontrol:
+ifneq (,$(strip $(PF9_OVN_SHA)))
+	dh_gencontrol -- -DPf9-Source-Sha=$(strip $(PF9_OVN_SHA))
+else
+	dh_gencontrol
+endif
+
 override_dh_strip:
 	dh_strip
 

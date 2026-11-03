@@ -73,7 +73,10 @@ else
     # Since we build in $ROOT/ovs, debs land in $ROOT.
     ( cd "$ROOT/ovs" && ./boot.sh )
     ( cd "$ROOT/ovs" && ./configure --prefix=/usr --libdir=/usr/lib/x86_64-linux-gnu --enable-ssl --enable-shared )
-    ( cd "$ROOT/ovs" && make debian && make debian-deb)
+    # Stamp the pf9-ovs commit into the debs as 'Pf9-Source-Sha' (see
+    # pf9-ovs debian/rules). pf9-apt uses it to decide whether an OVS package
+    # with an unchanged version string still needs upgrading.
+    ( cd "$ROOT/ovs" && PF9_OVS_SHA="$EXPECTED_OVS_SHA" make debian && PF9_OVS_SHA="$EXPECTED_OVS_SHA" make debian-deb)
 
     pf9_pack_ovs_cache "$UBUNTU_VERSION"
 fi

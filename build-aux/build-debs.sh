@@ -59,6 +59,7 @@ pf9_patch_ovn_binary_version
 # Static version (no build counter), stamped with Pf9-Source-Sha at build time
 # (pf9-ovs debian/rules). See the epoch note above.
 PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9+${UBUNTU_VERSION}
+PF9_OVS_PKG_EVR=$PF9_OVS_BUILD_VERSION   # OVS cache key (see pf9_pack_ovs_cache)
 printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
@@ -69,7 +70,7 @@ EXPECTED_OVS_SHA=$(git -C "$ROOT" rev-parse HEAD:ovs) || {
     exit 1
 }
 
-if pf9_restore_ovs_cache "$UBUNTU_VERSION" "$EXPECTED_OVS_SHA" "$PF9_OVS_BUILD_VERSION"; then
+if pf9_restore_ovs_cache "$UBUNTU_VERSION" "$EXPECTED_OVS_SHA" "$PF9_OVS_PKG_EVR"; then
     echo "OVS: using cached build tree"
 else
     echo "OVS: building from source"

@@ -108,7 +108,7 @@ pf9_pack_ovs_cache() {
         echo "ROOT=$ROOT"
         echo "PLAT=$plat"
         echo "OVS_BASE=$OVS_BASE"
-        echo "OVS_VER=${PF9_OVS_BUILD_VERSION:-}"
+        echo "OVS_VER=${PF9_OVS_PKG_EVR:-}"
         echo "OVS_SHA=$(git -C "$ROOT/ovs" rev-parse HEAD)"
         echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$meta"

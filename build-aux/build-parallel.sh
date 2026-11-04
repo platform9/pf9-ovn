@@ -90,6 +90,7 @@ run_platform_job() {
         -v "$dir":"$CONTAINER_MOUNT" \
         -w "$CONTAINER_MOUNT" \
         -e BUILD_NUMBER="$BUILD_NUMBER" \
+        -e TEAMCITY_BUILD_BRANCH="${TEAMCITY_BUILD_BRANCH:-}" \
         -e SKIP_OVS_CACHE="${SKIP_OVS_CACHE:-"0"}" \
         -e PF9_DEBUG_SYMBOLS="${PF9_DEBUG_SYMBOLS:-true}" \
         -e PF9_DEBUG_PACK=0 \

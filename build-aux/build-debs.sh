@@ -39,7 +39,8 @@ fi
 # The version carries the manual PF9_REVISION counter, not the CI build number: a rebuild
 # with an unchanged counter is the same version and is not reinstalled on hosts.
 OVN_REV=$(pf9_ovn_revision)
-PF9_OVN_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV}+${UBUNTU_VERSION}
+OVN_REV_STR=$(pf9_revision_string "$OVN_REV")   # private builds carry "pvt" (see build-common.sh)
+PF9_OVN_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV_STR}+${UBUNTU_VERSION}
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -66,7 +67,8 @@ else
     pf9_submodule_update
 
     OVS_REV=$(pf9_ovs_revision)
-    PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}+${UBUNTU_VERSION}
+    OVS_REV_STR=$(pf9_revision_string "$OVS_REV")
+    PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV_STR}+${UBUNTU_VERSION}
 
     # Update OVS Changelog
     sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
@@ -88,9 +90,10 @@ fi
 # The OVS tree is in place now (built or cached): fix its version, and record both versions
 # for the role build (line 1 OVN, line 2 OVS; the role appends +<os>).
 OVS_REV=$(pf9_ovs_revision)
-PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}+${UBUNTU_VERSION}
-printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV}" > "$TEAMCITY_ROOT/ovn-deb-version.txt"
-printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}" >> "$TEAMCITY_ROOT/ovn-deb-version.txt"
+OVS_REV_STR=$(pf9_revision_string "$OVS_REV")
+PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV_STR}+${UBUNTU_VERSION}
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV_STR}" > "$TEAMCITY_ROOT/ovn-deb-version.txt"
+printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV_STR}" >> "$TEAMCITY_ROOT/ovn-deb-version.txt"
 echo "Versions: OVN ${PF9_OVN_BUILD_VERSION}  OVS ${PF9_OVS_BUILD_VERSION}"
 
 # Install OVS dependencies required for OVN build

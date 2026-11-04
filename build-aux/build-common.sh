@@ -25,6 +25,34 @@ pf9_read_revision() {
     fi
     printf '%s' "$rev"
 }
+# Private builds: a build from any branch other than main or pcd-v* gets "pvt" in its version,
+#   <rev>  ->  0.pvt.<TeamCity build number>.<rev>      e.g. 2:24.03.6-pf9.0.pvt.628.1
+# so a private build can never have the same version, or filename, as a mainline one and the
+# repo never holds two different builds under one version. The 0 puts every private build
+# below every mainline revision (1, 2, ...), so a mainline build always replaces a private one,
+# and the build number makes each private build unique. Only dots and digits are used, which
+# every consumer (deb, rpm, autotools, python) accepts. An unknown branch counts as private.
+pf9_build_branch() {
+    if [ -n "${TEAMCITY_BUILD_BRANCH:-}" ]; then
+        echo "$TEAMCITY_BUILD_BRANCH"
+    else
+        git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+    fi
+}
+pf9_is_private_build() {
+    case "$(pf9_build_branch)" in
+        main|pcd-v*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+# pf9_revision_string <rev>: the revision as it appears in the version (see above)
+pf9_revision_string() {
+    if pf9_is_private_build; then
+        echo "0.pvt.${BUILD_NUMBER:?BUILD_NUMBER must be set for a private build}.$1"
+    else
+        echo "$1"
+    fi
+}
 pf9_ovn_revision() { pf9_read_revision "$ROOT/PF9_REVISION" OVN; }
 pf9_ovs_revision() { pf9_read_revision "$ROOT/ovs/PF9_REVISION" OVS; }
 
@@ -117,7 +145,7 @@ pf9_patch_ovn_binary_version() {
     # (PCD-8825), so only OVN_BASE has to agree between controller and northd.
     local ovn_rev
     ovn_rev=$(pf9_ovn_revision) || exit 1
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${ovn_rev}
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.$(pf9_revision_string "$ovn_rev")
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 

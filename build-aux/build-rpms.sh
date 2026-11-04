@@ -39,6 +39,7 @@ fi
 # manual PF9_REVISION counter, not the CI build number: an unchanged counter is the same
 # version and is not reinstalled on hosts.
 OVN_REV=$(pf9_ovn_revision)
+OVN_REV_STR=$(pf9_revision_string "$OVN_REV")   # private builds carry "pvt" (see build-common.sh)
 
 # configure.ac gets the dot-separated binary version (no OS suffix)
 # RPM package OS indicator comes from %{?dist} macro automatically (e.g. .el10)
@@ -63,7 +64,8 @@ else
     pf9_submodule_update
 
     OVS_REV=$(pf9_ovs_revision)
-    PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${OVS_REV}
+    OVS_REV_STR=$(pf9_revision_string "$OVS_REV")
+    PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${OVS_REV_STR}
 
     # Update OVS configure.ac
     sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
@@ -81,9 +83,10 @@ fi
 # The OVS tree is in place now (built or cached): record both versions for the role build
 # (line 1 OVN, line 2 OVS).
 OVS_REV=$(pf9_ovs_revision)
-printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV}" > "$TEAMCITY_ROOT/ovn-rpm-version.txt"
-printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV}" >> "$TEAMCITY_ROOT/ovn-rpm-version.txt"
-echo "Versions: OVN ${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV}  OVS ${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV}"
+OVS_REV_STR=$(pf9_revision_string "$OVS_REV")
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV_STR}" > "$TEAMCITY_ROOT/ovn-rpm-version.txt"
+printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV_STR}" >> "$TEAMCITY_ROOT/ovn-rpm-version.txt"
+echo "Versions: OVN ${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV_STR}  OVS ${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV_STR}"
 
 # Install OVS RPMs required for OVN build
 dnf install -y "$ROOT"/ovs/rpm/rpmbuild/RPMS/*/*.rpm || true

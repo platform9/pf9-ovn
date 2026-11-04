@@ -16,12 +16,14 @@ mkdir -p "$ROOT"
 printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
 printf '7\n' > "$ROOT/PF9_REVISION"
 
+# run_patch <PF9_OVN_VERSION> [branch]   branch defaults to main; "UNSET" leaves it unset
 run_patch() {
-    local pf9_ovn_version="$1"
+    local pf9_ovn_version="$1" branch="${2-main}"
     (
         cd "$WORKDIR"
         ROOT="$ROOT"
         . "$BUILD_COMMON"
+        if [ "$branch" = UNSET ]; then unset TEAMCITY_BUILD_BRANCH; else TEAMCITY_BUILD_BRANCH="$branch"; fi
         PF9_OVN_VERSION="$pf9_ovn_version"
         PF9_VERSION="2026.9.0"
         BUILD_NUMBER="42"   # must NOT leak into the version: only PF9_REVISION counts
@@ -87,3 +89,24 @@ if run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
     exit 1
 fi
 echo "PASS: a missing or malformed PF9_REVISION fails the build."
+
+# --- Part 5: builds from any branch other than main or pcd-v* carry "pvt" in the version ---
+# <rev> -> 0.pvt.<build number>.<rev>: unique per build and below every mainline revision, so a
+# private build can never collide with a mainline one in the repo.
+check_version() {  # <name> <expected> <branch>
+    printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+    printf '7\n' > "$ROOT/PF9_REVISION"
+    run_patch "2026.9.0-v24.03.6" "$3" > "$WORKDIR/out.txt" 2>&1 \
+        || { echo "FAIL: $1: build failed"; cat "$WORKDIR/out.txt"; exit 1; }
+    if [ "$(cat "$ROOT/configure.ac")" != "$2" ]; then
+        echo "FAIL: $1: branch '$3' gave '$(cat "$ROOT/configure.ac")', want '$2'" >&2
+        exit 1
+    fi
+    echo "PASS: $1: branch '$3' -> $2"
+}
+check_version "main is a mainline build"            "24.03.6.pf9.7"            main
+check_version "pcd-v* is a mainline build"          "24.03.6.pf9.7"            pcd-v2026.8
+check_version "a private branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   private/networking/manual-version-increment
+check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   feature-x
+check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.42.7"   mainline-fix
+check_version "an unknown branch counts as private" "24.03.6.pf9.0.pvt.42.7"   UNSET

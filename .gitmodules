@@ -1,3 +1,4 @@
 [submodule "ovs"]
 	path = ovs
 	url = git@github.com:platform9/pf9-ovs.git
+	branch = main

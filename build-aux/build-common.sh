@@ -183,12 +183,20 @@ pf9_build_reset() {
 #   pf9-ovn/ovs/                          whole tree incl. _debian/ or rpm/
 #                                         (ovs/.git excluded: a fresh
 #                                         checkout has its own git metadata)
-#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_SHA= BUILT_AT=
+#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_SHA= OVS_VARIANT= BUILT_AT=
 #   pf9-ovn/openvswitch-*.deb
 #   pf9-ovn/python3-openvswitch_*.deb     deb only (make debian-deb drops them
 #                                         in $ROOT, the parent of ovs/)
 #   (rpm packages live under ovs/rpm/rpmbuild/RPMS, i.e. inside the tree)
 # ---------------------------------------------------------------------------
+
+# The OVS tree has its version baked in, and the version depends on whether this is a private
+# build (see pf9_revision_string). A cache is only valid for the same variant: "mainline", or
+# "pvt-<build number>" for one private build, so a private build never reuses another build's
+# OVS and a mainline build never picks up a private one.
+pf9_cache_variant() {
+    if pf9_is_private_build; then echo "pvt-${BUILD_NUMBER:-unknown}"; else echo mainline; fi
+}
 
 # pf9_pack_ovs_cache <plat>
 # Run right after a fresh OVS build, BEFORE pf9_build_reset (which wipes it).
@@ -202,6 +210,7 @@ pf9_pack_ovs_cache() {
         echo "PLAT=$plat"
         echo "OVS_BASE=$OVS_BASE"
         echo "OVS_SHA=$(git -C "$ROOT/ovs" rev-parse HEAD)"
+        echo "OVS_VARIANT=$(pf9_cache_variant)"
         echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$meta"
     cat "$meta"
@@ -252,7 +261,7 @@ pf9_restore_ovs_cache() {
     local expected_ovs_sha="$2"
     local tarball="$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz"
     local tmp meta key val
-    local c_root="" c_plat="" c_base="" c_sha="" c_built=""
+    local c_root="" c_plat="" c_base="" c_sha="" c_variant="" c_built=""
 
     if [ ! -f "$tarball" ]; then
         echo "OVS cache: no tarball at $tarball -> building OVS from source"
@@ -287,17 +296,20 @@ pf9_restore_ovs_cache() {
             PLAT)     c_plat="$val" ;;
             OVS_BASE) c_base="$val" ;;
             OVS_SHA)  c_sha="$val" ;;
+            OVS_VARIANT) c_variant="$val" ;;
             BUILT_AT) c_built="$val" ;;
         esac
     done < "$meta"
 
     if [ "$c_root" != "$ROOT" ] || [ "$c_plat" != "$plat" ] \
-       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ]; then
+       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ] \
+       || [ "$c_variant" != "$(pf9_cache_variant)" ]; then
         echo "OVS cache: metadata mismatch -> building OVS from source"
         echo "  ROOT     cached='$c_root' current='$ROOT'"
         echo "  PLAT     cached='$c_plat' current='$plat'"
         echo "  OVS_BASE cached='$c_base' current='$OVS_BASE'"
         echo "  OVS_SHA  cached='$c_sha' current='$expected_ovs_sha'"
+        echo "  VARIANT  cached='$c_variant' current='$(pf9_cache_variant)'"
         rm -rf "$tmp"
         return 1
     fi

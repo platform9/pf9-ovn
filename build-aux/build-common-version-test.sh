@@ -110,3 +110,17 @@ check_version "a private branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   p
 check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   feature-x
 check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.42.7"   mainline-fix
 check_version "an unknown branch counts as private" "24.03.6.pf9.0.pvt.42.7"   UNSET
+
+# --- Part 6: the prebuilt-OVS cache is only valid for the same variant ---
+# The OVS tree has its version baked in, so a private build must not reuse another build's OVS,
+# and a mainline build must not pick up a private one.
+variant() {  # <branch> <build number>
+    ( cd "$WORKDIR"; ROOT="$ROOT"; . "$BUILD_COMMON"
+      TEAMCITY_BUILD_BRANCH="$1"; BUILD_NUMBER="$2"; pf9_cache_variant )
+}
+[ "$(variant main 42)" = "mainline" ]            || { echo "FAIL: main cache variant is '$(variant main 42)'" >&2; exit 1; }
+[ "$(variant pcd-v2026.8 43)" = "mainline" ]     || { echo "FAIL: pcd-v* cache variant" >&2; exit 1; }
+[ "$(variant feature-x 42)" = "pvt-42" ]         || { echo "FAIL: private cache variant is '$(variant feature-x 42)'" >&2; exit 1; }
+[ "$(variant feature-x 42)" != "$(variant feature-x 43)" ] || { echo "FAIL: two private builds share a cache variant" >&2; exit 1; }
+echo "PASS: cache variant is mainline for main and pcd-v*, pvt-<build> (unique per build) otherwise."
+

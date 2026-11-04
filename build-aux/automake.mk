@@ -6,6 +6,7 @@ EXTRA_DIST += \
     tests/ovn-host-prerm-cleanup-test.sh \
 	build-aux/calculate-pipeline-cksum \
     build-aux/build-rpms.sh \
+    build-aux/pf9-check-revision.sh \
 	build-aux/build-container-publish.sh \
 	build-aux/build-ovn-k8s.sh \
 	build-aux/build-parallel.sh \

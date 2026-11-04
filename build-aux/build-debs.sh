@@ -36,8 +36,10 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
 fi
 
 # --- OVN CONFIGURATION ---
-PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
-printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
+# The version carries the manual PF9_REVISION counter, not the CI build number: a rebuild
+# with an unchanged counter is the same version and is not reinstalled on hosts.
+OVN_REV=$(pf9_ovn_revision)
+PF9_OVN_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV}+${UBUNTU_VERSION}
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -46,12 +48,9 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/chan
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes.
-# Epoch 1 beats upstream; omitting build counter means existing CI-versioned
-# installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
-printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
-
+# OVS's version carries the PF9_REVISION counter of the pinned ovs submodule commit. The
+# counter is only readable once the submodule is checked out (a cache hit brings the tree
+# with it), so the OVS version is set where the tree appears, below.
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
 # configure.ac version edits, boot/configure/make and packs the result for next time before moving on.
@@ -66,12 +65,15 @@ else
     echo "OVS: building from source"
     pf9_submodule_update
 
+    OVS_REV=$(pf9_ovs_revision)
+    PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}+${UBUNTU_VERSION}
+
     # Update OVS Changelog
     sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
 
     # Python setuptools sanitization (PEP 440)
     # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^${PF9_PKG_EPOCH}://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
     sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
 
     # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
@@ -82,6 +84,14 @@ else
 
     pf9_pack_ovs_cache "$UBUNTU_VERSION"
 fi
+
+# The OVS tree is in place now (built or cached): fix its version, and record both versions
+# for the role build (line 1 OVN, line 2 OVS; the role appends +<os>).
+OVS_REV=$(pf9_ovs_revision)
+PF9_OVS_BUILD_VERSION=${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}+${UBUNTU_VERSION}
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-pf9.${OVN_REV}" > "$TEAMCITY_ROOT/ovn-deb-version.txt"
+printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}-pf9.${OVS_REV}" >> "$TEAMCITY_ROOT/ovn-deb-version.txt"
+echo "Versions: OVN ${PF9_OVN_BUILD_VERSION}  OVS ${PF9_OVS_BUILD_VERSION}"
 
 # Install OVS dependencies required for OVN build
 cd "$ROOT"

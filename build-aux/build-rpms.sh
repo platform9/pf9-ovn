@@ -35,17 +35,18 @@ if [ "$ROCKY_VERSION" != "r10" ]; then
 fi
 
 # --- OVN CONFIGURATION ---
-# RPM Version field does not allow hyphens; use dots throughout
-printf '%s\n' "1:${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+# RPM Version field does not allow hyphens; use dots throughout. The version carries the
+# manual PF9_REVISION counter, not the CI build number: an unchanged counter is the same
+# version and is not reinstalled on hosts.
+OVN_REV=$(pf9_ovn_revision)
 
 # configure.ac gets the dot-separated binary version (no OS suffix)
 # RPM package OS indicator comes from %{?dist} macro automatically (e.g. .el10)
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes
-PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
-printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
+# OVS's version carries the PF9_REVISION counter of the pinned ovs submodule commit, which is
+# only readable once the submodule is checked out (a cache hit brings the tree with it).
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
@@ -61,11 +62,14 @@ else
     echo "OVS: building from source"
     pf9_submodule_update
 
+    OVS_REV=$(pf9_ovs_revision)
+    PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${OVS_REV}
+
     # Update OVS configure.ac
     sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
 
-    # Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
-    sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+    # Inject the package epoch into the OVS spec on the fly (submodule is not tracked)
+    sed -i "s/^Version: @VERSION@/Epoch: ${PF9_PKG_EPOCH}\nVersion: @VERSION@/" "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
 
     ( cd "$ROOT/ovs" && ./boot.sh )
     ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
@@ -73,6 +77,13 @@ else
 
     pf9_pack_ovs_cache "$ROCKY_VERSION"
 fi
+
+# The OVS tree is in place now (built or cached): record both versions for the role build
+# (line 1 OVN, line 2 OVS).
+OVS_REV=$(pf9_ovs_revision)
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV}" > "$TEAMCITY_ROOT/ovn-rpm-version.txt"
+printf '%s' "${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV}" >> "$TEAMCITY_ROOT/ovn-rpm-version.txt"
+echo "Versions: OVN ${PF9_PKG_EPOCH}:${OVN_BASE}.pf9.${OVN_REV}  OVS ${PF9_PKG_EPOCH}:${OVS_BASE}.pf9.${OVS_REV}"
 
 # Install OVS RPMs required for OVN build
 dnf install -y "$ROOT"/ovs/rpm/rpmbuild/RPMS/*/*.rpm || true

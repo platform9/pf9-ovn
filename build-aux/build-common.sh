@@ -7,6 +7,27 @@ ROOT="$(pwd)/pf9-ovn"
 OVS_BASE="3.3.6"
 OVN_BASE="24.03.6"
 
+# PF9 package versioning (see PF9_VERSIONING.md). The package version carries a manual
+# revision counter, the only thing that marks a build as different from what is installed:
+#   deb  <epoch>:<base>-pf9.<revision>+<os>      rpm  <epoch>:<base>.pf9.<revision>-<release>
+# OVN's counter is PF9_REVISION in this repo; OVS's is PF9_REVISION in the ovs submodule.
+# Epoch 2 starts this scheme: it sorts above every earlier pf9 build (epoch 1).
+PF9_PKG_EPOCH=2
+
+# pf9_read_revision <file> <label>: print the counter, or fail the build if it is not a
+# positive integer. Call it as VAR=$(pf9_read_revision ...) so a failure stops a set -e script.
+pf9_read_revision() {
+    local rev
+    rev=$(tr -d '[:space:]' < "$1" 2>/dev/null) || true
+    if ! [[ "$rev" =~ ^[1-9][0-9]*$ ]]; then
+        echo "FATAL: $2 package revision file '$1' must hold a positive integer, found '${rev}'" >&2
+        return 1
+    fi
+    printf '%s' "$rev"
+}
+pf9_ovn_revision() { pf9_read_revision "$ROOT/PF9_REVISION" OVN; }
+pf9_ovs_revision() { pf9_read_revision "$ROOT/ovs/PF9_REVISION" OVS; }
+
 # Cache tarball for a prebuilt OVS tree (see pf9_pack_ovs_cache / pf9_restore_ovs_cache).
 # Consumers (build-debs.sh / build-rpms.sh) look for it under
 # $TEAMCITY_ROOT/ovs-cache/ovs-build-<plat>.tar.gz -- a TeamCity artifact
@@ -89,9 +110,14 @@ pf9_patch_ovn_binary_version() {
         exit 1
     fi
 
-    # Dots throughout, no epoch, no OS suffix — identical on all platforms.
-    # configure.ac carries this into OVN_PACKAGE_VERSION and thus ovn-appctl version.
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
+    # Dots throughout, no epoch, no OS suffix — identical on all platforms. It is the
+    # package version without the epoch, so the binary, the RPM Version and the deb
+    # upstream+revision all agree. configure.ac carries it into OVN_PACKAGE_VERSION and
+    # thus ovn-appctl version. ovn-northd's version match strips everything from ".pf9."
+    # (PCD-8825), so only OVN_BASE has to agree between controller and northd.
+    local ovn_rev
+    ovn_rev=$(pf9_ovn_revision) || exit 1
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${ovn_rev}
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 

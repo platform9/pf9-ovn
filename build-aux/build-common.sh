@@ -7,12 +7,111 @@ ROOT="$(pwd)/pf9-ovn"
 OVS_BASE="3.3.6"
 OVN_BASE="24.03.6"
 
+# PF9 package versioning (see PF9_VERSIONING.md). The package version carries a manual
+# revision counter, the only thing that marks a build as different from what is installed:
+#   deb  <epoch>:<base>-pf9.<revision>+<os>      rpm  <epoch>:<base>.pf9.<revision>-<release>
+# OVN's counter is PF9_REVISION in this repo; OVS's is PF9_REVISION in the ovs submodule.
+# Epoch 2 starts this scheme: it sorts above every earlier pf9 build (epoch 1).
+PF9_PKG_EPOCH=2
+
+# pf9_read_revision <file> <label>: print the counter, or fail the build if it is not a
+# positive integer. Call it as VAR=$(pf9_read_revision ...) so a failure stops a set -e script.
+pf9_read_revision() {
+    local rev
+    rev=$(tr -d '[:space:]' < "$1" 2>/dev/null) || true
+    if ! [[ "$rev" =~ ^[1-9][0-9]*$ ]]; then
+        echo "FATAL: $2 package revision file '$1' must hold a positive integer, found '${rev}'" >&2
+        return 1
+    fi
+    printf '%s' "$rev"
+}
+# Private builds: a build from any branch other than main or pcd-v* gets "pvt" in its version,
+#   <rev>  ->  0.pvt.<TeamCity build number>.<rev>      e.g. 2:24.03.6-pf9.0.pvt.628.1
+# so a private build can never have the same version, or filename, as a mainline one and the
+# repo never holds two different builds under one version. The 0 puts every private build
+# below every mainline revision (1, 2, ...), so a mainline build always replaces a private one,
+# and the build number makes each private build unique. Only dots and digits are used, which
+# every consumer (deb, rpm, autotools, python) accepts. An unknown branch counts as private.
+pf9_build_branch() {
+    if [ -n "${TEAMCITY_BUILD_BRANCH:-}" ]; then
+        echo "$TEAMCITY_BUILD_BRANCH"
+    else
+        git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+    fi
+}
+pf9_is_private_build() {
+    case "$(pf9_build_branch)" in
+        main|pcd-v*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+# pf9_revision_string <rev>: the revision as it appears in the version (see above)
+pf9_revision_string() {
+    if pf9_is_private_build; then
+        echo "0.pvt.${BUILD_NUMBER:?BUILD_NUMBER must be set for a private build}.$1"
+    else
+        echo "$1"
+    fi
+}
+pf9_ovn_revision() { pf9_read_revision "$ROOT/PF9_REVISION" OVN; }
+pf9_ovs_revision() { pf9_read_revision "$ROOT/ovs/PF9_REVISION" OVS; }
+
 # Cache tarball for a prebuilt OVS tree (see pf9_pack_ovs_cache / pf9_restore_ovs_cache).
 # Consumers (build-debs.sh / build-rpms.sh) look for it under
 # $TEAMCITY_ROOT/ovs-cache/ovs-build-<plat>.tar.gz -- a TeamCity artifact
 # dependency (or the parallel orchestrator, build-parallel.sh) is expected to
 # have dropped it there before the platform build runs.
 PF9_OVS_CACHE_META=".pf9-ovs-cache.meta"
+
+# PF9_DEBUG_SYMBOLS (TeamCity parameter env.PF9_DEBUG_SYMBOLS, default true; set it to
+# false to skip): the builds also keep the debug-symbol packages the toolchain already generates
+# (-dbgsym .ddeb on Ubuntu, -debuginfo/-debugsource RPMs on Rocky), so perf/gdb can
+# symbolize exactly this build. They go to debug/<os>-dbgsym or debug/<os>-debuginfo,
+# next to pkgs/ rather than inside it, so Packages.tar.gz (the hostagent repo and
+# container image input) is unchanged; they are packed into a separate debug.tar.gz
+# build artifact (about 100 MB for u22 + u24 + r10).
+PF9_DEBUG_DIR="$TEAMCITY_ROOT/debug"
+
+pf9_debug_symbols_enabled() {
+    case "${PF9_DEBUG_SYMBOLS:-true}" in
+        false|FALSE|False|0|no|off) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+# pf9_reset_debug_symbols removes debug/, debug.tar.gz and stray -dbgsym packages left
+# by an earlier build on this agent, so a build never publishes another build's symbols
+# (they would not match its BuildIDs). build-parallel.sh gives each platform a fresh
+# folder and clears the shared debug/ itself at job start. When the OS builds instead
+# run as separate steps in one shared checkout, they add to debug/ in turn, so the reset
+# runs once per build: the first step of a new BUILD_NUMBER clears and stamps debug/,
+# and later steps of the same build see the stamp and keep what earlier steps collected.
+# Without a BUILD_NUMBER (a local run) it always clears. It runs whether or not symbols
+# are enabled, so a build with PF9_DEBUG_SYMBOLS=false cannot pick up a stale
+# debug.tar.gz either.
+pf9_reset_debug_symbols() {
+    if [ -n "${BUILD_NUMBER:-}" ] && \
+       [ "$(cat "$PF9_DEBUG_DIR/.build-number" 2>/dev/null)" = "$BUILD_NUMBER" ]; then
+        return 0
+    fi
+    rm -rf "$PF9_DEBUG_DIR"
+    rm -f "$TEAMCITY_ROOT/debug.tar.gz"
+    # dpkg-buildpackage writes OVN's .ddeb files next to the checkout; an older build's
+    # would otherwise be swept into this build's archive.
+    rm -f "$TEAMCITY_ROOT"/*-dbgsym_*.ddeb "$ROOT"/*-dbgsym_*.ddeb
+    mkdir -p "$PF9_DEBUG_DIR"
+    printf '%s\n' "${BUILD_NUMBER:-}" > "$PF9_DEBUG_DIR/.build-number"
+}
+
+# pf9_pack_debug_symbols (re)creates $TEAMCITY_ROOT/debug.tar.gz from everything collected
+# in debug/ so far. Each OS build calls it, so after the last one the archive holds all
+# of them. build-parallel.sh sets PF9_DEBUG_PACK=0: it copies each platform's debug/
+# back and packs once at the end.
+pf9_pack_debug_symbols() {
+    [ "${PF9_DEBUG_PACK:-1}" = 0 ] && return 0
+    tar -czf "$TEAMCITY_ROOT/debug.tar.gz" -C "$TEAMCITY_ROOT" --exclude=.build-number debug
+    ls -la "$TEAMCITY_ROOT/debug.tar.gz"
+}
 
 pf9_git_setup() {
     git config --global --add safe.directory '*'
@@ -39,9 +138,14 @@ pf9_patch_ovn_binary_version() {
         exit 1
     fi
 
-    # Dots throughout, no epoch, no OS suffix — identical on all platforms.
-    # configure.ac carries this into OVN_PACKAGE_VERSION and thus ovn-appctl version.
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
+    # Dots throughout, no epoch, no OS suffix — identical on all platforms. It is the
+    # package version without the epoch, so the binary, the RPM Version and the deb
+    # upstream+revision all agree. configure.ac carries it into OVN_PACKAGE_VERSION and
+    # thus ovn-appctl version. ovn-northd's version match strips everything from ".pf9."
+    # (PCD-8825), so only OVN_BASE has to agree between controller and northd.
+    local ovn_rev
+    ovn_rev=$(pf9_ovn_revision) || exit 1
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.$(pf9_revision_string "$ovn_rev")
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 
@@ -79,12 +183,20 @@ pf9_build_reset() {
 #   pf9-ovn/ovs/                          whole tree incl. _debian/ or rpm/
 #                                         (ovs/.git excluded: a fresh
 #                                         checkout has its own git metadata)
-#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_SHA= BUILT_AT=
+#   pf9-ovn/ovs/.pf9-ovs-cache.meta       ROOT= PLAT= OVS_BASE= OVS_SHA= OVS_VARIANT= BUILT_AT=
 #   pf9-ovn/openvswitch-*.deb
 #   pf9-ovn/python3-openvswitch_*.deb     deb only (make debian-deb drops them
 #                                         in $ROOT, the parent of ovs/)
 #   (rpm packages live under ovs/rpm/rpmbuild/RPMS, i.e. inside the tree)
 # ---------------------------------------------------------------------------
+
+# The OVS tree has its version baked in, and the version depends on whether this is a private
+# build (see pf9_revision_string). A cache is only valid for the same variant: "mainline", or
+# "pvt-<build number>" for one private build, so a private build never reuses another build's
+# OVS and a mainline build never picks up a private one.
+pf9_cache_variant() {
+    if pf9_is_private_build; then echo "pvt-${BUILD_NUMBER:-unknown}"; else echo mainline; fi
+}
 
 # pf9_pack_ovs_cache <plat>
 # Run right after a fresh OVS build, BEFORE pf9_build_reset (which wipes it).
@@ -98,6 +210,7 @@ pf9_pack_ovs_cache() {
         echo "PLAT=$plat"
         echo "OVS_BASE=$OVS_BASE"
         echo "OVS_SHA=$(git -C "$ROOT/ovs" rev-parse HEAD)"
+        echo "OVS_VARIANT=$(pf9_cache_variant)"
         echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$meta"
     cat "$meta"
@@ -107,10 +220,13 @@ pf9_pack_ovs_cache() {
         u22|u24)
             # Globs must match: a missing package means the OVS build did not
             # produce what build-debs.sh dpkg -i's, and tar will fail (set -e).
+            # The OVS -dbgsym .ddeb files ride along (when the build made them), so a
+            # cache hit can still publish OVS debug symbols.
             ( cd "$TEAMCITY_ROOT" && tar -czf "$tarball" \
                 --exclude='pf9-ovn/ovs/.git' \
                 pf9-ovn/ovs \
-                pf9-ovn/openvswitch-*.deb pf9-ovn/python3-openvswitch_*.deb )
+                pf9-ovn/openvswitch-*.deb pf9-ovn/python3-openvswitch_*.deb \
+                $(cd "$TEAMCITY_ROOT" && ls pf9-ovn/*-dbgsym_*.ddeb 2>/dev/null) )
             ;;
         r10)
             test -d "$ROOT/ovs/rpm/rpmbuild/RPMS" || { echo "pf9_pack_ovs_cache: no RPMS dir under ovs/rpm"; return 1; }
@@ -145,7 +261,7 @@ pf9_restore_ovs_cache() {
     local expected_ovs_sha="$2"
     local tarball="$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz"
     local tmp meta key val
-    local c_root="" c_plat="" c_base="" c_sha="" c_built=""
+    local c_root="" c_plat="" c_base="" c_sha="" c_variant="" c_built=""
 
     if [ ! -f "$tarball" ]; then
         echo "OVS cache: no tarball at $tarball -> building OVS from source"
@@ -180,17 +296,20 @@ pf9_restore_ovs_cache() {
             PLAT)     c_plat="$val" ;;
             OVS_BASE) c_base="$val" ;;
             OVS_SHA)  c_sha="$val" ;;
+            OVS_VARIANT) c_variant="$val" ;;
             BUILT_AT) c_built="$val" ;;
         esac
     done < "$meta"
 
     if [ "$c_root" != "$ROOT" ] || [ "$c_plat" != "$plat" ] \
-       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ]; then
+       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ] \
+       || [ "$c_variant" != "$(pf9_cache_variant)" ]; then
         echo "OVS cache: metadata mismatch -> building OVS from source"
         echo "  ROOT     cached='$c_root' current='$ROOT'"
         echo "  PLAT     cached='$c_plat' current='$plat'"
         echo "  OVS_BASE cached='$c_base' current='$OVS_BASE'"
         echo "  OVS_SHA  cached='$c_sha' current='$expected_ovs_sha'"
+        echo "  VARIANT  cached='$c_variant' current='$(pf9_cache_variant)'"
         rm -rf "$tmp"
         return 1
     fi
@@ -201,6 +320,13 @@ pf9_restore_ovs_cache() {
         u22|u24)
             if ! ls "$tmp"/pf9-ovn/openvswitch-*.deb "$tmp"/pf9-ovn/python3-openvswitch_*.deb >/dev/null 2>&1; then
                 echo "OVS cache: tarball has no openvswitch-*.deb / python3-openvswitch_*.deb -> building OVS from source"
+                rm -rf "$tmp"
+                return 1
+            fi
+            # A cache packed before it carried the OVS .ddeb files would make this
+            # build publish OVN symbols only. Rebuild once; the new cache has them.
+            if pf9_debug_symbols_enabled && ! ls "$tmp"/pf9-ovn/*-dbgsym_*.ddeb >/dev/null 2>&1; then
+                echo "OVS cache: tarball has no OVS -dbgsym .ddeb files and debug symbols are on -> building OVS from source"
                 rm -rf "$tmp"
                 return 1
             fi
@@ -218,7 +344,8 @@ pf9_restore_ovs_cache() {
     # source/build tree. The cache does not need Git metadata to build OVN.
     if ! { rm -rf "$ROOT/ovs" \
            && mv "$tmp/pf9-ovn/ovs" "$ROOT/ovs" \
-           && { [ "$plat" = r10 ] || mv "$tmp"/pf9-ovn/*.deb "$ROOT"/; }; }; then
+           && { [ "$plat" = r10 ] || mv "$tmp"/pf9-ovn/*.deb "$ROOT"/; } \
+           && { ! ls "$tmp"/pf9-ovn/*.ddeb >/dev/null 2>&1 || mv "$tmp"/pf9-ovn/*.ddeb "$ROOT"/; }; }; then
         echo "OVS cache: failed to move cached tree/packages into place"
         rm -rf "$ROOT/ovs" "$tmp"
         return 1

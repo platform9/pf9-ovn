@@ -100,6 +100,9 @@ EXTRA_DIST = \
 	.github/workflows/test.yml \
 	.github/workflows/ovn-kubernetes.yml \
 	.github/workflows/ovn-fake-multinode-tests.yml \
+	.github/workflows/pf9-revision-check.yml \
+	PF9_REVISION \
+	PF9_VERSIONING.md \
 	.readthedocs.yaml \
 	boot.sh \
 	container/Dockerfile \

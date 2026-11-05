@@ -14,16 +14,19 @@ trap 'rm -rf "$WORKDIR"' EXIT
 ROOT="$WORKDIR/pf9-ovn"
 mkdir -p "$ROOT"
 printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+printf '7\n' > "$ROOT/PF9_REVISION"
 
+# run_patch <PF9_OVN_VERSION> [branch]   branch defaults to main; "UNSET" leaves it unset
 run_patch() {
-    local pf9_ovn_version="$1"
+    local pf9_ovn_version="$1" branch="${2-main}"
     (
         cd "$WORKDIR"
         ROOT="$ROOT"
         . "$BUILD_COMMON"
+        if [ "$branch" = UNSET ]; then unset TEAMCITY_BUILD_BRANCH; else TEAMCITY_BUILD_BRANCH="$branch"; fi
         PF9_OVN_VERSION="$pf9_ovn_version"
         PF9_VERSION="2026.9.0"
-        BUILD_NUMBER="42"
+        BUILD_NUMBER="42"   # must NOT leak into the version: only PF9_REVISION counts
         pf9_patch_ovn_binary_version
     )
 }
@@ -39,6 +42,13 @@ if ! run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
     exit 1
 fi
 echo "PASS: matching PF9_OVN_VERSION/OVN_BASE builds without error."
+
+# The binary version is <base>.pf9.<PF9_REVISION>: no PCD version, no CI build number.
+if [ "$(cat "$ROOT/configure.ac")" != "24.03.6.pf9.7" ]; then
+    echo "FAIL: expected binary version 24.03.6.pf9.7, got '$(cat "$ROOT/configure.ac")'" >&2
+    exit 1
+fi
+echo "PASS: binary version is <OVN_BASE>.pf9.<PF9_REVISION> (24.03.6.pf9.7)."
 
 # --- Part 2: drifted versions fail loudly instead of silently building ---
 if run_patch "2026.9.0-v99.99.99" > "$WORKDIR/out.txt" 2>&1; then
@@ -62,3 +72,55 @@ if run_patch "2026.9.0" > "$WORKDIR/out.txt" 2>&1; then
     exit 1
 fi
 echo "PASS: a PF9_OVN_VERSION missing its -v<version> suffix is also caught."
+
+# --- Part 4: a missing or malformed PF9_REVISION fails the build ---
+for bad in "" "0" "abc" "-3" "1.5"; do
+    printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+    printf '%s\n' "$bad" > "$ROOT/PF9_REVISION"
+    if run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
+        echo "FAIL: PF9_REVISION='$bad' was accepted." >&2
+        exit 1
+    fi
+done
+rm -f "$ROOT/PF9_REVISION"
+printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+if run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
+    echo "FAIL: a missing PF9_REVISION was accepted." >&2
+    exit 1
+fi
+echo "PASS: a missing or malformed PF9_REVISION fails the build."
+
+# --- Part 5: builds from any branch other than main or pcd-v* carry "pvt" in the version ---
+# <rev> -> 0.pvt.<build number>.<rev>: unique per build and below every mainline revision, so a
+# private build can never collide with a mainline one in the repo.
+check_version() {  # <name> <expected> <branch>
+    printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
+    printf '7\n' > "$ROOT/PF9_REVISION"
+    run_patch "2026.9.0-v24.03.6" "$3" > "$WORKDIR/out.txt" 2>&1 \
+        || { echo "FAIL: $1: build failed"; cat "$WORKDIR/out.txt"; exit 1; }
+    if [ "$(cat "$ROOT/configure.ac")" != "$2" ]; then
+        echo "FAIL: $1: branch '$3' gave '$(cat "$ROOT/configure.ac")', want '$2'" >&2
+        exit 1
+    fi
+    echo "PASS: $1: branch '$3' -> $2"
+}
+check_version "main is a mainline build"            "24.03.6.pf9.7"            main
+check_version "pcd-v* is a mainline build"          "24.03.6.pf9.7"            pcd-v2026.8
+check_version "a private branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   private/networking/manual-version-increment
+check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   feature-x
+check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.42.7"   mainline-fix
+check_version "an unknown branch counts as private" "24.03.6.pf9.0.pvt.42.7"   UNSET
+
+# --- Part 6: the prebuilt-OVS cache is only valid for the same variant ---
+# The OVS tree has its version baked in, so a private build must not reuse another build's OVS,
+# and a mainline build must not pick up a private one.
+variant() {  # <branch> <build number>
+    ( cd "$WORKDIR"; ROOT="$ROOT"; . "$BUILD_COMMON"
+      TEAMCITY_BUILD_BRANCH="$1"; BUILD_NUMBER="$2"; pf9_cache_variant )
+}
+[ "$(variant main 42)" = "mainline" ]            || { echo "FAIL: main cache variant is '$(variant main 42)'" >&2; exit 1; }
+[ "$(variant pcd-v2026.8 43)" = "mainline" ]     || { echo "FAIL: pcd-v* cache variant" >&2; exit 1; }
+[ "$(variant feature-x 42)" = "pvt-42" ]         || { echo "FAIL: private cache variant is '$(variant feature-x 42)'" >&2; exit 1; }
+[ "$(variant feature-x 42)" != "$(variant feature-x 43)" ] || { echo "FAIL: two private builds share a cache variant" >&2; exit 1; }
+echo "PASS: cache variant is mainline for main and pcd-v*, pvt-<build> (unique per build) otherwise."
+

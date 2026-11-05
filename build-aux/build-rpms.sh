@@ -37,11 +37,13 @@ fi
 # --- OVN CONFIGURATION ---
 # Version scheme: see build-common.sh. RPM Version/Release cannot contain hyphens, so
 # 2:<base>-<PF9_VERSION>-<build id>-<OS> is spelled Epoch=2, Version=<base>,
-# Release=<PF9_VERSION>.<build id>.<OS>. ovn-rpm-version.txt carries the epoch:version
-# (the role depends on "= <epoch>:<version>-<release>" without the OS tag).
+# Release=<PF9_VERSION>.<build id>.<OS>. ovn-rpm-version.txt carries the full
+# epoch:version-release: the role depends on "ovn = <that>", and an RPM "=" dependency
+# with a release only matches that exact release (including the OS tag, r10 is the only
+# RPM platform).
 pf9_set_build_id
 PF9_RPM_RELEASE="${PF9_VERSION}.${PF9_BUILD_ID}"
-printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_RPM_RELEASE}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_RPM_RELEASE}.${ROCKY_VERSION}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # The OVN spec's Version is the *package* version (<base>); the source tarball and the
 # unpacked tree keep the binary version from configure.ac (which has ".pf9." in it, see
@@ -65,9 +67,9 @@ pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
 # Same scheme as OVN. PF9_OVS_BUILD_VERSION is the binary/tarball version (".pf9." kept);
-# PF9_OVS_PKG_VERSION is the package epoch:version-release (no OS tag).
+# PF9_OVS_PKG_VERSION is the package epoch:version-release.
 PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${PF9_VERSION}.${PF9_BUILD_ID}
-PF9_OVS_PKG_VERSION="${PF9_PKG_EPOCH}:${OVS_BASE}-${PF9_RPM_RELEASE}"
+PF9_OVS_PKG_VERSION="${PF9_PKG_EPOCH}:${OVS_BASE}-${PF9_RPM_RELEASE}.${ROCKY_VERSION}"
 printf '%s' "$PF9_OVS_PKG_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---

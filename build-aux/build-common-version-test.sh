@@ -91,7 +91,7 @@ fi
 echo "PASS: a missing or malformed PF9_REVISION fails the build."
 
 # --- Part 5: builds from any branch other than main or pcd-v* carry "pvt" in the version ---
-# <rev> -> 0.pvt.<build number>.<rev>: unique per build and below every mainline revision, so a
+# <rev> -> 0.pvt.<build number>.<branch slug>.<rev>: unique per build and below every mainline revision, so a
 # private build can never collide with a mainline one in the repo.
 check_version() {  # <name> <expected> <branch>
     printf '__PF9_OVN_BUILD_VERSION__\n' > "$ROOT/configure.ac"
@@ -106,10 +106,12 @@ check_version() {  # <name> <expected> <branch>
 }
 check_version "main is a mainline build"            "24.03.6.pf9.7"            main
 check_version "pcd-v* is a mainline build"          "24.03.6.pf9.7"            pcd-v2026.8
-check_version "a private branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   private/networking/manual-version-increment
-check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.42.7"   feature-x
-check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.42.7"   mainline-fix
-check_version "an unknown branch counts as private" "24.03.6.pf9.0.pvt.42.7"   UNSET
+check_version "a private branch carries pvt + slug" "24.03.6.pf9.0.pvt.42.networking.manual.versio.7"   private/networking/manual-version-increment
+check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.42.feature.x.7"   feature-x
+check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.42.mainline.fix.7" mainline-fix
+check_version "case and underscores are normalised" "24.03.6.pf9.0.pvt.42.my.branch.v2.7"  My_Branch/V2
+check_version "a long name is capped"               "24.03.6.pf9.0.pvt.42.abcdefghijklmnopqrstuvwx.7" abcdefghijklmnopqrstuvwxyz0123
+check_version "an unknown branch counts as private" "24.03.6.pf9.0.pvt.42.unknown.7"     UNSET
 
 # --- Part 6: the prebuilt-OVS cache is only valid for the same variant ---
 # The OVS tree has its version baked in, so a private build must not reuse another build's OVS,

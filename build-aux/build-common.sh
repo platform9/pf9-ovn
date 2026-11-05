@@ -26,12 +26,15 @@ pf9_read_revision() {
     printf '%s' "$rev"
 }
 # Private builds: a build from any branch other than main or pcd-v* gets "pvt" in its version,
-#   <rev>  ->  0.pvt.<TeamCity build number>.<rev>      e.g. 2:24.03.6-pf9.0.pvt.628.1
+#   <rev>  ->  0.pvt.<TeamCity build number>.<branch slug>.<rev>
+#                                          e.g. 2:24.03.6-pf9.0.pvt.628.manual.version.increment.1
 # so a private build can never have the same version, or filename, as a mainline one and the
 # repo never holds two different builds under one version. The 0 puts every private build
 # below every mainline revision (1, 2, ...), so a mainline build always replaces a private one,
-# and the build number makes each private build unique. Only dots and digits are used, which
-# every consumer (deb, rpm, autotools, python) accepts. An unknown branch counts as private.
+# and the build number makes each private build unique. The branch slug says where it came from;
+# it comes AFTER the build number so builds still sort by number, and the revision stays the
+# trailing integer. Only dots, letters and digits are used, which every consumer (deb, rpm,
+# autotools, python) accepts. An unknown branch counts as private.
 pf9_build_branch() {
     if [ -n "${TEAMCITY_BUILD_BRANCH:-}" ]; then
         echo "$TEAMCITY_BUILD_BRANCH"
@@ -45,10 +48,18 @@ pf9_is_private_build() {
         *) return 0 ;;
     esac
 }
+# pf9_branch_slug: the branch as a version-safe token: lower case, runs of anything other than
+# letters/digits become one dot, a leading "private." is dropped, capped at 24 characters.
+# private/networking/manual-version-increment -> networking.manual.version.incr
+pf9_branch_slug() {
+    local slug
+    slug=$(pf9_build_branch | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/./g; s/^\.+//; s/\.+$//; s/^private\.//' | cut -c1-24 | sed -E 's/\.+$//')
+    echo "${slug:-unknown}"
+}
 # pf9_revision_string <rev>: the revision as it appears in the version (see above)
 pf9_revision_string() {
     if pf9_is_private_build; then
-        echo "0.pvt.${BUILD_NUMBER:?BUILD_NUMBER must be set for a private build}.$1"
+        echo "0.pvt.${BUILD_NUMBER:?BUILD_NUMBER must be set for a private build}.$(pf9_branch_slug).$1"
     else
         echo "$1"
     fi

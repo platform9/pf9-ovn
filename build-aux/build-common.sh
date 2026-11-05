@@ -26,15 +26,16 @@ pf9_read_revision() {
     printf '%s' "$rev"
 }
 # Private builds: a build from any branch other than main or pcd-v* gets "pvt" in its version,
-#   <rev>  ->  0.pvt.<TeamCity build number>.<branch slug>.<rev>
-#                                          e.g. 2:24.03.6-pf9.0.pvt.628.manual.version.increment.1
+#   <rev>  ->  0.pvt.<branch slug>.<rev>
+#                                          e.g. 2:24.03.6-pf9.0.pvt.networking.manual.versio.1
 # so a private build can never have the same version, or filename, as a mainline one and the
 # repo never holds two different builds under one version. The 0 puts every private build
 # below every mainline revision (1, 2, ...), so a mainline build always replaces a private one,
-# and the build number makes each private build unique. The branch slug says where it came from;
-# it comes AFTER the build number so builds still sort by number, and the revision stays the
-# trailing integer. Only dots, letters and digits are used, which every consumer (deb, rpm,
-# autotools, python) accepts. An unknown branch counts as private.
+# and the branch slug says where it came from. As on mainline, the PF9_REVISION counter is the
+# only thing that says "this changed": rebuilding a branch without a bump gives the same
+# version (and filename), so bump the counter for every change you want hosts and the repo to
+# see. The revision stays the trailing integer. Only dots, letters and digits are used, which
+# every consumer (deb, rpm, autotools, python) accepts. An unknown branch counts as private.
 pf9_build_branch() {
     if [ -n "${TEAMCITY_BUILD_BRANCH:-}" ]; then
         echo "$TEAMCITY_BUILD_BRANCH"
@@ -59,7 +60,7 @@ pf9_branch_slug() {
 # pf9_revision_string <rev>: the revision as it appears in the version (see above)
 pf9_revision_string() {
     if pf9_is_private_build; then
-        echo "0.pvt.${BUILD_NUMBER:?BUILD_NUMBER must be set for a private build}.$(pf9_branch_slug).$1"
+        echo "0.pvt.$(pf9_branch_slug).$1"
     else
         echo "$1"
     fi
@@ -203,10 +204,10 @@ pf9_build_reset() {
 
 # The OVS tree has its version baked in, and the version depends on whether this is a private
 # build (see pf9_revision_string). A cache is only valid for the same variant: "mainline", or
-# "pvt-<build number>" for one private build, so a private build never reuses another build's
+# "pvt-<branch slug>" for one private branch, so a private build never reuses another branch's
 # OVS and a mainline build never picks up a private one.
 pf9_cache_variant() {
-    if pf9_is_private_build; then echo "pvt-${BUILD_NUMBER:-unknown}"; else echo mainline; fi
+    if pf9_is_private_build; then echo "pvt-$(pf9_branch_slug)"; else echo mainline; fi
 }
 
 # pf9_pack_ovs_cache <plat>

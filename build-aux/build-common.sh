@@ -30,14 +30,16 @@ pf9_debug_symbols_enabled() {
     esac
 }
 
-# pf9_reset_debug_symbols removes debug/ and debug.tar.gz left by an earlier build on
-# this agent, so a build never publishes another build's symbols (they would not match
-# its BuildIDs). Each OS build is its own TeamCity step in one shared checkout and the
-# steps add to debug/ in turn, so the reset runs once per build: the first step of a new
-# BUILD_NUMBER clears and stamps debug/, and later steps of the same build see the stamp
-# and keep what earlier steps collected. Without a BUILD_NUMBER (a local run) it always
-# clears. It runs whether or not symbols are enabled, so a build with
-# PF9_DEBUG_SYMBOLS=false cannot pick up a stale debug.tar.gz either.
+# pf9_reset_debug_symbols removes debug/, debug.tar.gz and stray -dbgsym packages left
+# by an earlier build on this agent, so a build never publishes another build's symbols
+# (they would not match its BuildIDs). build-parallel.sh gives each platform a fresh
+# folder and clears the shared debug/ itself at job start. When the OS builds instead
+# run as separate steps in one shared checkout, they add to debug/ in turn, so the reset
+# runs once per build: the first step of a new BUILD_NUMBER clears and stamps debug/,
+# and later steps of the same build see the stamp and keep what earlier steps collected.
+# Without a BUILD_NUMBER (a local run) it always clears. It runs whether or not symbols
+# are enabled, so a build with PF9_DEBUG_SYMBOLS=false cannot pick up a stale
+# debug.tar.gz either.
 pf9_reset_debug_symbols() {
     if [ -n "${BUILD_NUMBER:-}" ] && \
        [ "$(cat "$PF9_DEBUG_DIR/.build-number" 2>/dev/null)" = "$BUILD_NUMBER" ]; then
@@ -45,14 +47,19 @@ pf9_reset_debug_symbols() {
     fi
     rm -rf "$PF9_DEBUG_DIR"
     rm -f "$TEAMCITY_ROOT/debug.tar.gz"
+    # dpkg-buildpackage writes OVN's .ddeb files next to the checkout; an older build's
+    # would otherwise be swept into this build's archive.
+    rm -f "$TEAMCITY_ROOT"/*-dbgsym_*.ddeb "$ROOT"/*-dbgsym_*.ddeb
     mkdir -p "$PF9_DEBUG_DIR"
     printf '%s\n' "${BUILD_NUMBER:-}" > "$PF9_DEBUG_DIR/.build-number"
 }
 
 # pf9_pack_debug_symbols (re)creates $TEAMCITY_ROOT/debug.tar.gz from everything collected
 # in debug/ so far. Each OS build calls it, so after the last one the archive holds all
-# of them.
+# of them. build-parallel.sh sets PF9_DEBUG_PACK=0: it copies each platform's debug/
+# back and packs once at the end.
 pf9_pack_debug_symbols() {
+    [ "${PF9_DEBUG_PACK:-1}" = 0 ] && return 0
     tar -czf "$TEAMCITY_ROOT/debug.tar.gz" -C "$TEAMCITY_ROOT" --exclude=.build-number debug
     ls -la "$TEAMCITY_ROOT/debug.tar.gz"
 }
@@ -150,10 +157,13 @@ pf9_pack_ovs_cache() {
         u22|u24)
             # Globs must match: a missing package means the OVS build did not
             # produce what build-debs.sh dpkg -i's, and tar will fail (set -e).
+            # The OVS -dbgsym .ddeb files ride along (when the build made them), so a
+            # cache hit can still publish OVS debug symbols.
             ( cd "$TEAMCITY_ROOT" && tar -czf "$tarball" \
                 --exclude='pf9-ovn/ovs/.git' \
                 pf9-ovn/ovs \
-                pf9-ovn/openvswitch-*.deb pf9-ovn/python3-openvswitch_*.deb )
+                pf9-ovn/openvswitch-*.deb pf9-ovn/python3-openvswitch_*.deb \
+                $(cd "$TEAMCITY_ROOT" && ls pf9-ovn/*-dbgsym_*.ddeb 2>/dev/null) )
             ;;
         r10)
             test -d "$ROOT/ovs/rpm/rpmbuild/RPMS" || { echo "pf9_pack_ovs_cache: no RPMS dir under ovs/rpm"; return 1; }
@@ -247,6 +257,13 @@ pf9_restore_ovs_cache() {
                 rm -rf "$tmp"
                 return 1
             fi
+            # A cache packed before it carried the OVS .ddeb files would make this
+            # build publish OVN symbols only. Rebuild once; the new cache has them.
+            if pf9_debug_symbols_enabled && ! ls "$tmp"/pf9-ovn/*-dbgsym_*.ddeb >/dev/null 2>&1; then
+                echo "OVS cache: tarball has no OVS -dbgsym .ddeb files and debug symbols are on -> building OVS from source"
+                rm -rf "$tmp"
+                return 1
+            fi
             ;;
         r10)
             if ! ls "$tmp"/pf9-ovn/ovs/rpm/rpmbuild/RPMS/*/*.rpm >/dev/null 2>&1; then
@@ -261,7 +278,8 @@ pf9_restore_ovs_cache() {
     # source/build tree. The cache does not need Git metadata to build OVN.
     if ! { rm -rf "$ROOT/ovs" \
            && mv "$tmp/pf9-ovn/ovs" "$ROOT/ovs" \
-           && { [ "$plat" = r10 ] || mv "$tmp"/pf9-ovn/*.deb "$ROOT"/; }; }; then
+           && { [ "$plat" = r10 ] || mv "$tmp"/pf9-ovn/*.deb "$ROOT"/; } \
+           && { ! ls "$tmp"/pf9-ovn/*.ddeb >/dev/null 2>&1 || mv "$tmp"/pf9-ovn/*.ddeb "$ROOT"/; }; }; then
         echo "OVS cache: failed to move cached tree/packages into place"
         rm -rf "$ROOT/ovs" "$tmp"
         return 1

@@ -54,6 +54,9 @@ docker run \
 rm -rf "$WORK_DIR" "$LOG_DIR"
 
 rm -rf "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT"/ovn-*-version.txt
+# Debug symbols from an earlier build on this agent must never be published with this
+# one: they would not match its BuildIDs.
+rm -rf "$TEAMCITY_ROOT/debug" "$TEAMCITY_ROOT/debug.tar.gz"
 mkdir -p "$WORK_DIR" "$LOG_DIR"
 mkdir -p "$TEAMCITY_ROOT/pkgs" "$TEAMCITY_ROOT/ovs-cache"
 
@@ -88,6 +91,8 @@ run_platform_job() {
         -w "$CONTAINER_MOUNT" \
         -e BUILD_NUMBER="$BUILD_NUMBER" \
         -e SKIP_OVS_CACHE="${SKIP_OVS_CACHE:-"0"}" \
+        -e PF9_DEBUG_SYMBOLS="${PF9_DEBUG_SYMBOLS:-true}" \
+        -e PF9_DEBUG_PACK=0 \
         "$image" \
         bash -c "bash pf9-ovn/build-aux/$script $args && chmod -R 777 $CONTAINER_MOUNT"
  
@@ -112,6 +117,14 @@ run_platform_job() {
     if [ -d "$dir/pkgs/$plat" ]; then
         rm -rf "$TEAMCITY_ROOT/pkgs/$plat"
         cp -a --no-preserve=ownership "$dir/pkgs/$plat" "$TEAMCITY_ROOT/pkgs/$plat"
+    fi
+
+    # Debug symbols (debug/<plat>-dbgsym or -debuginfo); packed once after all platforms.
+    if [ -d "$dir/debug" ]; then
+        mkdir -p "$TEAMCITY_ROOT/debug"
+        for d in "$dir"/debug/*/; do
+            [ -d "$d" ] && cp -a --no-preserve=ownership "$d" "$TEAMCITY_ROOT/debug/"
+        done
     fi
 
     if [ "$plat" = "u22" ] || [ "$plat" = "u24" ]; then
@@ -180,6 +193,13 @@ rm -rf "$WORK_DIR"
 if [ "${#FAILED[@]}" -gt 0 ]; then
     echo "=== FAILED platforms: ${FAILED[*]} ==="
     exit 1
+fi
+
+if [ -n "$(ls -A "$TEAMCITY_ROOT/debug" 2>/dev/null)" ]; then
+    echo "=== Packing debug symbols into debug.tar.gz ==="
+    tar -czf "$TEAMCITY_ROOT/debug.tar.gz" -C "$TEAMCITY_ROOT" debug
+    ls -la "$TEAMCITY_ROOT/debug.tar.gz"
+    tar -tzf "$TEAMCITY_ROOT/debug.tar.gz" | grep -c 'dbgsym\|debuginfo\|debugsource' || true
 fi
 
 exit 0

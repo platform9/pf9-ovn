@@ -26,16 +26,17 @@ pf9_read_revision() {
     printf '%s' "$rev"
 }
 # The version always says which branch built it, and where it sorts:
-#   mainline (main, pcd-v*):  <rev>  ->  <rev>.<branch slug>          2:24.03.6-pf9.1.main
-#   private  (any other):     <rev>  ->  0.pvt.<branch slug>.<rev>    2:24.03.6-pf9.0.pvt.feature.x.1
-# Mainline puts the revision FIRST so deb and rpm both order it by revision, then by slug:
-# pf9.1 < pf9.1.main < pf9.2 (a slug-first form would sort above a later revision in deb and
-# below it in rpm). The leading 0 of a private build puts it below every mainline revision, so a
-# mainline build always replaces a private one. The slug keeps main, pcd-v* and private builds
-# from ever sharing a version, or a filename, in the repo. PF9_REVISION is the only thing that
-# says "this changed": rebuild a branch without a bump and you get the same version. Only dots,
-# letters and digits are used, which every consumer (deb, rpm, autotools, python) accepts. An
-# unknown branch counts as private.
+#   mainline (main, pcd-v*):  <rev>  ->  <rev>.<branch slug>        2:24.03.6-pf9.1.main
+#   private  (any other):     <rev>  ->  <rev>.pvt.<branch slug>    2:24.03.6-pf9.1.pvt.feature.x
+# <rev> is PF9_REVISION: a private branch inherits the revision of the branch it was cut from,
+# so its build sorts just ABOVE that mainline revision (an upgrade, never a downgrade) and below
+# the next one. The revision comes first so deb and rpm both order by revision, then by the tag
+# after it: pf9.1 < pf9.1.main < pf9.1.pcd.v2026.8 < pf9.1.pvt.feature.x < pf9.2 (a slug-first
+# form would sort above a later revision in deb and below it in rpm). "pvt" sorts after both
+# mainline slugs, and the slug keeps main, pcd-v* and private builds from ever sharing a version
+# or a filename in the repo. PF9_REVISION is the only thing that says "this changed": rebuild a
+# branch without a bump and you get the same version. Only dots, letters and digits are used,
+# which every consumer (deb, rpm, autotools, python) accepts. An unknown branch counts as private.
 pf9_build_branch() {
     if [ -n "${TEAMCITY_BUILD_BRANCH:-}" ]; then
         echo "$TEAMCITY_BUILD_BRANCH"
@@ -61,7 +62,7 @@ pf9_branch_slug() {
 # pf9_revision_string <rev>: the revision as it appears in the version (see above)
 pf9_revision_string() {
     if pf9_is_private_build; then
-        echo "0.pvt.$(pf9_branch_slug).$1"
+        echo "$1.pvt.$(pf9_branch_slug)"
     else
         echo "$1.$(pf9_branch_slug)"
     fi

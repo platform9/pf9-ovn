@@ -26,7 +26,7 @@ run_patch() {
         if [ "$branch" = UNSET ]; then unset TEAMCITY_BUILD_BRANCH; else TEAMCITY_BUILD_BRANCH="$branch"; fi
         PF9_OVN_VERSION="$pf9_ovn_version"
         PF9_VERSION="2026.9.0"
-        BUILD_NUMBER="42"   # must NOT leak into the version: only PF9_REVISION counts
+        BUILD_NUMBER="42"   # must NOT leak into the version: only PF9_REVISION and the branch count
         pf9_patch_ovn_binary_version
     )
 }
@@ -44,11 +44,11 @@ fi
 echo "PASS: matching PF9_OVN_VERSION/OVN_BASE builds without error."
 
 # The binary version is <base>.pf9.<PF9_REVISION>: no PCD version, no CI build number.
-if [ "$(cat "$ROOT/configure.ac")" != "24.03.6.pf9.7" ]; then
-    echo "FAIL: expected binary version 24.03.6.pf9.7, got '$(cat "$ROOT/configure.ac")'" >&2
+if [ "$(cat "$ROOT/configure.ac")" != "24.03.6.pf9.7.main" ]; then
+    echo "FAIL: expected binary version 24.03.6.pf9.7.main, got '$(cat "$ROOT/configure.ac")'" >&2
     exit 1
 fi
-echo "PASS: binary version is <OVN_BASE>.pf9.<PF9_REVISION> (24.03.6.pf9.7)."
+echo "PASS: binary version is <OVN_BASE>.pf9.<PF9_REVISION>.<branch> (24.03.6.pf9.7.main)."
 
 # --- Part 2: drifted versions fail loudly instead of silently building ---
 if run_patch "2026.9.0-v99.99.99" > "$WORKDIR/out.txt" 2>&1; then
@@ -104,8 +104,8 @@ check_version() {  # <name> <expected> <branch>
     fi
     echo "PASS: $1: branch '$3' -> $2"
 }
-check_version "main is a mainline build"            "24.03.6.pf9.7"            main
-check_version "pcd-v* is a mainline build"          "24.03.6.pf9.7"            pcd-v2026.8
+check_version "main carries its slug after the rev"            "24.03.6.pf9.7.main"       main
+check_version "pcd-v* carries its slug after the rev"          "24.03.6.pf9.7.pcd.v2026.8" pcd-v2026.8
 check_version "a private branch carries pvt + slug" "24.03.6.pf9.0.pvt.networking.manual.versio.7"   private/networking/manual-version-increment
 check_version "any other branch carries pvt"        "24.03.6.pf9.0.pvt.feature.x.7"   feature-x
 check_version "main-like names are not mainline"    "24.03.6.pf9.0.pvt.mainline.fix.7" mainline-fix
@@ -120,9 +120,9 @@ variant() {  # <branch> <build number>
     ( cd "$WORKDIR"; ROOT="$ROOT"; . "$BUILD_COMMON"
       TEAMCITY_BUILD_BRANCH="$1"; BUILD_NUMBER="$2"; pf9_cache_variant )
 }
-[ "$(variant main 42)" = "mainline" ]            || { echo "FAIL: main cache variant is '$(variant main 42)'" >&2; exit 1; }
-[ "$(variant pcd-v2026.8 43)" = "mainline" ]     || { echo "FAIL: pcd-v* cache variant" >&2; exit 1; }
+[ "$(variant main 42)" = "pf9-main" ]            || { echo "FAIL: main cache variant is '$(variant main 42)'" >&2; exit 1; }
+[ "$(variant pcd-v2026.8 43)" = "pf9-pcd.v2026.8" ] || { echo "FAIL: pcd-v* cache variant is '$(variant pcd-v2026.8 43)'" >&2; exit 1; }
 [ "$(variant feature-x 42)" = "pvt-feature.x" ]         || { echo "FAIL: private cache variant is '$(variant feature-x 42)'" >&2; exit 1; }
 [ "$(variant feature-x 42)" != "$(variant feature-y 42)" ] || { echo "FAIL: two private branches share a cache variant" >&2; exit 1; }
-echo "PASS: cache variant is mainline for main and pcd-v*, pvt-<branch slug> (unique per branch) otherwise."
+echo "PASS: cache variant is pf9-<slug> for main and pcd-v*, pvt-<slug> otherwise (unique per branch)."
 

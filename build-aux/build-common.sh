@@ -64,6 +64,40 @@ pf9_pack_debug_symbols() {
     ls -la "$TEAMCITY_ROOT/debug.tar.gz"
 }
 
+# Package version scheme (OVN and OVS, deb and rpm):
+#
+#     <epoch>:<OVN/OVS base>-<PF9_VERSION>-<TEAMCITY_BUILD_ID>-<OS>
+#     e.g.  2:24.03.6-2026.9.0-1234567-u22   (deb)   2:24.03.6-2026.9.0.1234567.r10 (rpm)
+#
+# - Epoch 2 beats every package built under the old "1:<base>-pf9-<ver>-<build number>"
+#   and static "1:<base>-pf9" schemes, so existing hosts upgrade.
+# - The build counter is TeamCity's internal build id (%teamcity.build.id%, exported as
+#   TEAMCITY_BUILD_ID), not the build number: the id is unique and increases across every
+#   build configuration, branch and private build, so versions order by build time.
+# - There is no "pf9" token in the package version. RPM Version/Release cannot contain
+#   hyphens, so there the same fields are Version=<base>, Release=<PF9_VERSION>.<id>.<OS>.
+#
+# The *binary* version baked into configure.ac (ovn-appctl version, and through it the
+# northd_internal_version in SB_Global) is NOT the package version. It keeps the
+# ".pf9.<PF9_VERSION>.<id>" sub-version: ovn_version_base() in
+# controller/ovn-controller.c strips ".pf9" up to the next "-" before comparing
+# controller and northd versions (PCD-8825, 4fa1ef430), so builds that differ only in
+# PF9 version/build id still match. Dropping ".pf9" from the binary version would make
+# every controller/northd pair with different builds mismatch.
+PF9_PKG_EPOCH=2
+
+# pf9_set_build_id: sets PF9_BUILD_ID from TEAMCITY_BUILD_ID, failing the build when it is
+# missing or not numeric (an unset id would silently produce a version that sorts lowest).
+pf9_set_build_id() {
+    if ! [[ "${TEAMCITY_BUILD_ID:-}" =~ ^[0-9]+$ ]]; then
+        echo "FATAL: TEAMCITY_BUILD_ID must be set to the numeric TeamCity build id" \
+             "(%teamcity.build.id%); got '${TEAMCITY_BUILD_ID:-}'. For a local build," \
+             "export a number that is larger than the build id installed on the target." >&2
+        exit 1
+    fi
+    PF9_BUILD_ID="$TEAMCITY_BUILD_ID"
+}
+
 pf9_git_setup() {
     git config --global --add safe.directory '*'
     git config --global url."https://github.com/".insteadOf "git@github.com:"
@@ -91,7 +125,8 @@ pf9_patch_ovn_binary_version() {
 
     # Dots throughout, no epoch, no OS suffix — identical on all platforms.
     # configure.ac carries this into OVN_PACKAGE_VERSION and thus ovn-appctl version.
-    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}
+    # Keeps ".pf9." (see the version scheme comment above) and uses the same build id as the package.
+    PF9_OVN_BINARY_VERSION=${OVN_BASE}.pf9.${PF9_VERSION}.${PF9_BUILD_ID}
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 
@@ -147,6 +182,7 @@ pf9_pack_ovs_cache() {
         echo "ROOT=$ROOT"
         echo "PLAT=$plat"
         echo "OVS_BASE=$OVS_BASE"
+        echo "OVS_PKG_VERSION=$PF9_OVS_PKG_VERSION"
         echo "OVS_SHA=$(git -C "$ROOT/ovs" rev-parse HEAD)"
         echo "BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } > "$meta"
@@ -182,7 +218,8 @@ pf9_pack_ovs_cache() {
 # pf9_restore_ovs_cache <plat> <expected_ovs_sha>
 # Returns 0 (and replaces $ROOT/ovs + OVS packages with the cached ones) only
 # if $TEAMCITY_ROOT/ovs-cache/ovs-build-<plat>.tar.gz exists and its
-# ROOT/PLAT/OVS_BASE/OVS_SHA all match the current values; returns 1 with a
+# ROOT/PLAT/OVS_BASE/OVS_SHA/OVS_PKG_VERSION all match the current values (the
+# OVS package version carries the build id, so a cache from another build never matches); returns 1 with a
 # reason otherwise, leaving $ROOT/ovs untouched so the caller can initialize
 # the submodule and build from source.
 #
@@ -198,7 +235,7 @@ pf9_restore_ovs_cache() {
     local expected_ovs_sha="$2"
     local tarball="$TEAMCITY_ROOT/ovs-cache/ovs-build-${plat}.tar.gz"
     local tmp meta key val
-    local c_root="" c_plat="" c_base="" c_sha="" c_built=""
+    local c_root="" c_plat="" c_base="" c_sha="" c_built="" c_pkgver=""
 
     if [ ! -f "$tarball" ]; then
         echo "OVS cache: no tarball at $tarball -> building OVS from source"
@@ -232,18 +269,21 @@ pf9_restore_ovs_cache() {
             ROOT)     c_root="$val" ;;
             PLAT)     c_plat="$val" ;;
             OVS_BASE) c_base="$val" ;;
+            OVS_PKG_VERSION) c_pkgver="$val" ;;
             OVS_SHA)  c_sha="$val" ;;
             BUILT_AT) c_built="$val" ;;
         esac
     done < "$meta"
 
     if [ "$c_root" != "$ROOT" ] || [ "$c_plat" != "$plat" ] \
-       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ]; then
+       || [ "$c_base" != "$OVS_BASE" ] || [ "$c_sha" != "$expected_ovs_sha" ] \
+       || [ "$c_pkgver" != "$PF9_OVS_PKG_VERSION" ]; then
         echo "OVS cache: metadata mismatch -> building OVS from source"
         echo "  ROOT     cached='$c_root' current='$ROOT'"
         echo "  PLAT     cached='$c_plat' current='$plat'"
         echo "  OVS_BASE cached='$c_base' current='$OVS_BASE'"
         echo "  OVS_SHA  cached='$c_sha' current='$expected_ovs_sha'"
+        echo "  OVS_PKG_VERSION cached='$c_pkgver' current='$PF9_OVS_PKG_VERSION'"
         rm -rf "$tmp"
         return 1
     fi

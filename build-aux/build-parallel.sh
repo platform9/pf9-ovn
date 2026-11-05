@@ -8,6 +8,9 @@ WORK_DIR="$TEAMCITY_ROOT/.parallel-build"
 LOG_DIR="$TEAMCITY_ROOT/.parallel-build-logs"
  
 : "${BUILD_NUMBER:?BUILD_NUMBER must be set (TeamCity provides this automatically)}"
+# Package versions carry the TeamCity build id (see build-common.sh): set the TeamCity
+# parameter env.TEAMCITY_BUILD_ID=%teamcity.build.id%.
+: "${TEAMCITY_BUILD_ID:?TEAMCITY_BUILD_ID must be set (env.TEAMCITY_BUILD_ID=%teamcity.build.id%)}"
 
 CONTAINER_MOUNT=/build
  
@@ -90,6 +93,7 @@ run_platform_job() {
         -v "$dir":"$CONTAINER_MOUNT" \
         -w "$CONTAINER_MOUNT" \
         -e BUILD_NUMBER="$BUILD_NUMBER" \
+        -e TEAMCITY_BUILD_ID="$TEAMCITY_BUILD_ID" \
         -e SKIP_OVS_CACHE="${SKIP_OVS_CACHE:-"0"}" \
         -e PF9_DEBUG_SYMBOLS="${PF9_DEBUG_SYMBOLS:-true}" \
         -e PF9_DEBUG_PACK=0 \

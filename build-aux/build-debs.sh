@@ -36,8 +36,14 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
 fi
 
 # --- OVN CONFIGURATION ---
-PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
-printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
+# Version scheme: see build-common.sh. <epoch>:<base>-<PF9_VERSION>-<build id>-<OS>; the
+# last hyphen starts the Debian revision, so the OS tag is the revision (u24 > u22 on an
+# Ubuntu upgrade). ovn-deb-version.txt omits the OS tag so one file serves both OS builds
+# and the role's ">= <version>" dependencies are satisfied by either.
+pf9_set_build_id
+PF9_OVN_PKG_VERSION="${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_VERSION}-${PF9_BUILD_ID}"
+PF9_OVN_BUILD_VERSION="${PF9_OVN_PKG_VERSION}${UBUNTU_VERSION:+-${UBUNTU_VERSION}}"
+printf '%s\n' "$PF9_OVN_PKG_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -46,11 +52,10 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/chan
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes.
-# Epoch 1 beats upstream; omitting build counter means existing CI-versioned
-# installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
-printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+# Same scheme as OVN, so every build of OVN ships a matching OVS and hosts upgrade both.
+PF9_OVS_PKG_VERSION="${PF9_PKG_EPOCH}:${OVS_BASE}-${PF9_VERSION}-${PF9_BUILD_ID}"
+PF9_OVS_BUILD_VERSION="${PF9_OVS_PKG_VERSION}${UBUNTU_VERSION:+-${UBUNTU_VERSION}}"
+printf '%s' "$PF9_OVS_PKG_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
@@ -70,8 +75,8 @@ else
     sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
 
     # Python setuptools sanitization (PEP 440)
-    # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+    # Binary/python version: <base>+pf9.<PF9_VERSION>.<build id> (local segment, dots only)
+    PF9_OVS_PYTHON_VERSION="${OVS_BASE}+pf9.${PF9_VERSION}.${PF9_BUILD_ID}"
     sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
 
     # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.

@@ -130,6 +130,64 @@ pf9_patch_ovn_binary_version() {
     sed -i "s/__PF9_OVN_BUILD_VERSION__/${PF9_OVN_BINARY_VERSION}/g" "$ROOT/configure.ac"
 }
 
+# --- Source commit stamp ------------------------------------------------------------
+# Every OVN and OVS package records the git commit it was built from, so an installed
+# build can be traced back to its source:
+#   deb  control field   Pf9-Source-Sha: <sha>        (dpkg-deb -f <deb> Pf9-Source-Sha)
+#   rpm  provide         pf9-source-sha(<sha>)        (rpm -q --provides <pkg>)
+# The OVN sha is this repo's HEAD; the OVS sha is the commit the ovs submodule points at.
+
+# pf9_stamp_deb_rules <debian/rules> <sha>: adds a dh_gencontrol override that writes the
+# field into every binary package of that source tree. Used for OVS, a submodule this
+# build does not edit in the repo (it patches its changelog and configure.ac the same
+# way); OVN's own debian/rules stamps itself from PF9_OVN_SHA.
+pf9_stamp_deb_rules() {
+    local rules="$1" sha="$2"
+    if grep -q '^override_dh_gencontrol:' "$rules"; then
+        echo "FATAL: $rules already overrides dh_gencontrol; stamp it there instead" >&2
+        exit 1
+    fi
+    printf '\noverride_dh_gencontrol:\n\tdh_gencontrol -- -DPf9-Source-Sha=%s\n' "$sha" >> "$rules"
+}
+
+# pf9_stamp_rpm_spec <spec> <sha>: adds "Provides: pf9-source-sha(<sha>)" to every package
+# in the spec: after each Summary:, which every package and subpackage has exactly once.
+pf9_stamp_rpm_spec() {
+    local spec="$1" sha="$2" summaries provides
+    sed -i "/^Summary:/a Provides: pf9-source-sha(${sha})" "$spec"
+    summaries=$(grep -c '^Summary:' "$spec")
+    provides=$(grep -c "^Provides: pf9-source-sha(${sha})\$" "$spec")
+    if [ "$summaries" -lt 1 ] || [ "$summaries" != "$provides" ]; then
+        echo "FATAL: could not stamp $spec ($summaries Summary lines, $provides stamps)" >&2
+        exit 1
+    fi
+}
+
+# pf9_verify_deb_stamp <sha> <deb>...: fails the build unless every deb carries the sha.
+pf9_verify_deb_stamp() {
+    local sha="$1" deb got
+    shift
+    for deb in "$@"; do
+        got=$(dpkg-deb -f "$deb" Pf9-Source-Sha)
+        if [ "$got" != "$sha" ]; then
+            echo "FATAL: $(basename "$deb") Pf9-Source-Sha='$got', expected '$sha'" >&2
+            exit 1
+        fi
+    done
+}
+
+# pf9_verify_rpm_stamp <sha> <rpm>...: fails the build unless every rpm provides the sha.
+pf9_verify_rpm_stamp() {
+    local sha="$1" rpm
+    shift
+    for rpm in "$@"; do
+        if ! rpm -qp --provides "$rpm" | grep -qxF "pf9-source-sha(${sha})"; then
+            echo "FATAL: $(basename "$rpm") does not provide pf9-source-sha(${sha})" >&2
+            exit 1
+        fi
+    done
+}
+
 pf9_build_reset() {
     cd "$ROOT"
     git reset HEAD --hard

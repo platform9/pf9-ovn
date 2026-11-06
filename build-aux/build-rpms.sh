@@ -61,6 +61,14 @@ grep -q '^Version: '"${OVN_BASE}"'$' "$ROOT/rhel/ovn-fedora.spec.in" \
     && grep -q '^%autosetup -n ovn-%{pf9binver} ' "$ROOT/rhel/ovn-fedora.spec.in" \
     || { echo "FATAL: could not rewrite rhel/ovn-fedora.spec.in version fields (spec changed?)" >&2; exit 1; }
 
+# Record the commit this OVN was built from in every OVN rpm, as pf9-source-sha(<sha>)
+# (OVS gets its own commit, below).
+PF9_OVN_SHA=$(git -C "$ROOT" rev-parse HEAD) || {
+    echo "Unable to determine the pf9-ovn commit"
+    exit 1
+}
+pf9_stamp_rpm_spec "$ROOT/rhel/ovn-fedora.spec.in" "$PF9_OVN_SHA"
+
 # configure.ac gets the dot-separated binary version (no OS suffix)
 # RPM package OS indicator comes from %{?dist} macro automatically (e.g. .el10)
 pf9_patch_ovn_binary_version
@@ -104,6 +112,9 @@ else
         && grep -q '^%setup -q -n %{name}-%{pf9binver}$' "$OVS_SPEC" \
         || { echo "FATAL: could not rewrite $OVS_SPEC version fields (spec changed?)" >&2; exit 1; }
 
+    # Record the pf9-ovs commit in every OVS rpm as pf9-source-sha(<sha>).
+    pf9_stamp_rpm_spec "$OVS_SPEC" "$EXPECTED_OVS_SHA"
+
     ( cd "$ROOT/ovs" && ./boot.sh )
     ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
     ( cd "$ROOT/ovs" && make rpm-fedora RPMBUILD_OPT="--without check" )
@@ -126,6 +137,19 @@ export OVSDIR OVSBUILDDIR OVSVERSION=${PF9_OVS_BUILD_VERSION}
     --with-ovs-source="$OVSDIR"
 
 make rpm-fedora RPMBUILD_OPT="--without check"
+
+# --- VERIFY the pf9-source-sha stamp ---
+# Every OVN and OVS rpm must provide the commit it was built from. Debug-symbol packages
+# are left out; they are not installed on hosts and have no Summary to stamp.
+mapfile -t OVN_RPMS < <(find "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" ! -name "*-debuginfo-*" ! -name "*-debugsource-*")
+mapfile -t OVS_RPMS < <(find "$ROOT/ovs/rpm/rpmbuild/RPMS" -name "*.rpm" ! -name "*-debuginfo-*" ! -name "*-debugsource-*")
+if [ ${#OVN_RPMS[@]} -eq 0 ] || [ ${#OVS_RPMS[@]} -eq 0 ]; then
+    echo "FATAL: found ${#OVN_RPMS[@]} OVN and ${#OVS_RPMS[@]} OVS rpms to check for pf9-source-sha" >&2
+    exit 1
+fi
+pf9_verify_rpm_stamp "$PF9_OVN_SHA" "${OVN_RPMS[@]}"
+pf9_verify_rpm_stamp "$EXPECTED_OVS_SHA" "${OVS_RPMS[@]}"
+echo "Verified pf9-source-sha: OVN ${PF9_OVN_SHA:0:12} on ${#OVN_RPMS[@]} rpms, OVS ${EXPECTED_OVS_SHA:0:12} on ${#OVS_RPMS[@]} rpms"
 
 # --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
 # rpmbuild generates -debuginfo/-debugsource RPMs; normally they are deleted below.

@@ -114,3 +114,71 @@ if command -v dpkg >/dev/null 2>&1; then
 else
     echo "SKIP: dpkg not available, deb version ordering not checked."
 fi
+
+# --- Part 7: the source commit stamp (Pf9-Source-Sha / pf9-source-sha) ---
+SHA="0123456789abcdef0123456789abcdef01234567"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+run_common() ( cd "$WORKDIR" && ROOT="$ROOT" && . "$BUILD_COMMON" && "$@" )
+
+# 7a. deb: the override is appended once, with the sha, and refuses a second stamp.
+printf '%%:\n\tdh $@\n' > "$WORKDIR/rules"
+run_common pf9_stamp_deb_rules "$WORKDIR/rules" "$SHA"
+grep -qxF "	dh_gencontrol -- -DPf9-Source-Sha=$SHA" "$WORKDIR/rules" \
+    && grep -qx 'override_dh_gencontrol:' "$WORKDIR/rules" \
+    || { echo "FAIL: pf9_stamp_deb_rules did not write the override" >&2; exit 1; }
+if run_common pf9_stamp_deb_rules "$WORKDIR/rules" "$SHA" >/dev/null 2>&1; then
+    echo "FAIL: pf9_stamp_deb_rules stamped a rules file that already overrides dh_gencontrol" >&2
+    exit 1
+fi
+echo "PASS: pf9_stamp_deb_rules appends the dh_gencontrol override once."
+
+# 7b. rpm: one Provides per package, on a fixture and on this repo's own OVN spec.
+printf 'Name: x\nSummary: main\n%%package a\nSummary: a\n%%package b\nSummary: b\n' > "$WORKDIR/x.spec"
+run_common pf9_stamp_rpm_spec "$WORKDIR/x.spec" "$SHA"
+[ "$(grep -c "^Provides: pf9-source-sha($SHA)\$" "$WORKDIR/x.spec")" = 3 ] \
+    || { echo "FAIL: pf9_stamp_rpm_spec did not stamp every package of the fixture" >&2; exit 1; }
+cp "$REPO_ROOT/rhel/ovn-fedora.spec.in" "$WORKDIR/ovn.spec"
+run_common pf9_stamp_rpm_spec "$WORKDIR/ovn.spec" "$SHA"
+[ "$(grep -c '^Summary:' "$WORKDIR/ovn.spec")" = "$(grep -c "^Provides: pf9-source-sha($SHA)\$" "$WORKDIR/ovn.spec")" ] \
+    || { echo "FAIL: not every package of rhel/ovn-fedora.spec.in is stamped" >&2; exit 1; }
+printf 'Name: nosummary\n' > "$WORKDIR/none.spec"
+if run_common pf9_stamp_rpm_spec "$WORKDIR/none.spec" "$SHA" >/dev/null 2>&1; then
+    echo "FAIL: pf9_stamp_rpm_spec accepted a spec without any package" >&2
+    exit 1
+fi
+echo "PASS: pf9_stamp_rpm_spec stamps every package, including this repo's OVN spec."
+
+# 7c. OVN's own debian/rules stamps from PF9_OVN_SHA and omits the field when it is unset.
+grep -q '^override_dh_gencontrol:' "$REPO_ROOT/debian/rules" \
+    && grep -q 'dh_gencontrol -- -DPf9-Source-Sha=$(strip $(PF9_OVN_SHA))' "$REPO_ROOT/debian/rules" \
+    || { echo "FAIL: debian/rules does not stamp Pf9-Source-Sha from PF9_OVN_SHA" >&2; exit 1; }
+echo "PASS: debian/rules stamps Pf9-Source-Sha from PF9_OVN_SHA."
+
+# 7d. The verify helpers fail on a missing or wrong stamp. dpkg-deb and rpm are stubbed
+# so this runs anywhere; each stub answers from the file named after its argument.
+STUBS="$WORKDIR/stubs"
+mkdir -p "$STUBS"
+printf '#!/bin/sh\n# dpkg-deb -f <deb> Pf9-Source-Sha\ncat "$2.sha" 2>/dev/null\n' > "$STUBS/dpkg-deb"
+printf '#!/bin/sh\n# rpm -qp --provides <rpm>\ncat "$3.provides" 2>/dev/null\n' > "$STUBS/rpm"
+chmod +x "$STUBS/dpkg-deb" "$STUBS/rpm"
+printf '%s\n' "$SHA" > "$WORKDIR/ok.deb.sha"
+printf '%s\n' "other" > "$WORKDIR/bad.deb.sha"
+printf 'pf9-source-sha(%s)\nopenvswitch\n' "$SHA" > "$WORKDIR/ok.rpm.provides"
+printf 'pf9-source-sha(other)\n' > "$WORKDIR/bad.rpm.provides"
+: > "$WORKDIR/none.rpm.provides"
+verify() ( export PATH="$STUBS:$PATH"; run_common "$@" )
+verify pf9_verify_deb_stamp "$SHA" "$WORKDIR/ok.deb" \
+    && verify pf9_verify_rpm_stamp "$SHA" "$WORKDIR/ok.rpm" \
+    || { echo "FAIL: the verify helpers rejected a correctly stamped package" >&2; exit 1; }
+for case in "pf9_verify_deb_stamp $SHA $WORKDIR/bad.deb" \
+            "pf9_verify_deb_stamp $SHA $WORKDIR/missing.deb" \
+            "pf9_verify_deb_stamp $SHA $WORKDIR/ok.deb $WORKDIR/bad.deb" \
+            "pf9_verify_rpm_stamp $SHA $WORKDIR/bad.rpm" \
+            "pf9_verify_rpm_stamp $SHA $WORKDIR/none.rpm"; do
+    # shellcheck disable=SC2086
+    if verify $case >/dev/null 2>&1; then
+        echo "FAIL: the verify helpers accepted: $case" >&2
+        exit 1
+    fi
+done
+echo "PASS: the verify helpers fail on a wrong, missing or partly wrong stamp."

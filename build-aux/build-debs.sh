@@ -43,6 +43,14 @@ fi
 pf9_set_build_id
 PF9_OVN_PKG_VERSION="${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_VERSION}-${PF9_BUILD_ID}"
 PF9_OVN_BUILD_VERSION="${PF9_OVN_PKG_VERSION}${UBUNTU_VERSION:+-${UBUNTU_VERSION}}"
+
+# The commit this OVN was built from; debian/rules writes it into every OVN deb as
+# Pf9-Source-Sha (OVS gets its own commit, below).
+PF9_OVN_SHA=$(git -C "$ROOT" rev-parse HEAD) || {
+    echo "Unable to determine the pf9-ovn commit"
+    exit 1
+}
+export PF9_OVN_SHA
 printf '%s\n' "$PF9_OVN_PKG_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
@@ -78,6 +86,9 @@ else
     # Binary/python version: <base>+pf9.<PF9_VERSION>.<build id> (local segment, dots only)
     PF9_OVS_PYTHON_VERSION="${OVS_BASE}+pf9.${PF9_VERSION}.${PF9_BUILD_ID}"
     sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
+
+    # Record the pf9-ovs commit in every OVS deb as Pf9-Source-Sha.
+    pf9_stamp_deb_rules "$ROOT/ovs/debian/rules" "$EXPECTED_OVS_SHA"
 
     # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
     # Since we build in $ROOT/ovs, debs land in $ROOT.
@@ -122,6 +133,19 @@ rm -f build-aux/ltmain.sh
 
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
+
+# --- VERIFY the Pf9-Source-Sha stamp ---
+# Every OVN and OVS deb must carry the commit it was built from. Debug-symbol packages
+# are left out; they are not installed on hosts.
+mapfile -t OVN_DEBS < <(ls "$TEAMCITY_ROOT"/ovn-*.deb 2>/dev/null | grep -v -- '-dbgsym_' || true)
+mapfile -t OVS_DEBS < <(ls "$ROOT"/openvswitch-*.deb "$ROOT"/python3-openvswitch_*.deb 2>/dev/null | grep -v -- '-dbgsym_' || true)
+if [ ${#OVN_DEBS[@]} -eq 0 ] || [ ${#OVS_DEBS[@]} -eq 0 ]; then
+    echo "FATAL: found ${#OVN_DEBS[@]} OVN and ${#OVS_DEBS[@]} OVS debs to check for Pf9-Source-Sha" >&2
+    exit 1
+fi
+pf9_verify_deb_stamp "$PF9_OVN_SHA" "${OVN_DEBS[@]}"
+pf9_verify_deb_stamp "$EXPECTED_OVS_SHA" "${OVS_DEBS[@]}"
+echo "Verified Pf9-Source-Sha: OVN ${PF9_OVN_SHA:0:12} on ${#OVN_DEBS[@]} debs, OVS ${EXPECTED_OVS_SHA:0:12} on ${#OVS_DEBS[@]} debs"
 
 # --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
 # dh_strip always generates -dbgsym packages, but Ubuntu's debhelper writes them as

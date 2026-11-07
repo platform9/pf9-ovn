@@ -71,6 +71,16 @@ override_dh_installinit:
 override_dh_installsystemd:
 	dh_installsystemd --no-start
 
+# Record the pf9-ovn commit this was built from in every binary package, as the
+# Pf9-Source-Sha control field. build-debs.sh exports PF9_OVN_SHA and checks the field
+# on the built debs; without it (a local dpkg-buildpackage) the field is left out.
+override_dh_gencontrol:
+ifneq (,$(strip $(PF9_OVN_SHA)))
+	dh_gencontrol -- -DPf9-Source-Sha=$(strip $(PF9_OVN_SHA))
+else
+	dh_gencontrol
+endif
+
 override_dh_strip:
 	dh_strip
 

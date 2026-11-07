@@ -20,6 +20,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libunwind-dev git strongswan kmod uuid-runtime python3-netifaces
 
 pf9_git_setup
+pf9_reset_debug_symbols
 
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
@@ -35,8 +36,22 @@ if [ "$UBUNTU_VERSION" != "u22" ] && [ "$UBUNTU_VERSION" != "u24" ] && [ -n "$UB
 fi
 
 # --- OVN CONFIGURATION ---
-PF9_OVN_BUILD_VERSION=1:${OVN_BASE}-pf9-$PF9_VERSION-$BUILD_NUMBER+${UBUNTU_VERSION}
-printf '%s\n' "1:${OVN_BASE}-pf9-${PF9_VERSION}-${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-deb-version.txt
+# Version scheme: see build-common.sh. <epoch>:<base>-<PF9_VERSION>-<build id>-<OS>; the
+# last hyphen starts the Debian revision, so the OS tag is the revision (u24 > u22 on an
+# Ubuntu upgrade). ovn-deb-version.txt omits the OS tag so one file serves both OS builds
+# and the role's ">= <version>" dependencies are satisfied by either.
+pf9_set_build_id
+PF9_OVN_PKG_VERSION="${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_VERSION}-${PF9_BUILD_ID}"
+PF9_OVN_BUILD_VERSION="${PF9_OVN_PKG_VERSION}${UBUNTU_VERSION:+-${UBUNTU_VERSION}}"
+
+# The commit this OVN was built from; debian/rules writes it into every OVN deb as
+# Pf9-Source-Sha (OVS gets its own commit, below).
+PF9_OVN_SHA=$(git -C "$ROOT" rev-parse HEAD) || {
+    echo "Unable to determine the pf9-ovn commit"
+    exit 1
+}
+export PF9_OVN_SHA
+printf '%s\n' "$PF9_OVN_PKG_VERSION" > $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # debian/changelog gets the full epoch-prefixed version for apt dependency resolution
 # configure.ac gets the dot-separated binary version via pf9_patch_ovn_binary_version
@@ -45,11 +60,10 @@ sed -i "s/__PF9_OVN_BUILD_VERSION__/$PF9_OVN_BUILD_VERSION/g" "$ROOT/debian/chan
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes.
-# Epoch 1 beats upstream; omitting build counter means existing CI-versioned
-# installs (e.g. 1:3.3.x-pf9-YYYY.M.P-NNN) are already >= this and won't upgrade.
-PF9_OVS_BUILD_VERSION=1:${OVS_BASE}-pf9+${UBUNTU_VERSION}
-printf '%s' "1:${OVS_BASE}-pf9" >> $TEAMCITY_ROOT/ovn-deb-version.txt
+# Same scheme as OVN, so every build of OVN ships a matching OVS and hosts upgrade both.
+PF9_OVS_PKG_VERSION="${PF9_PKG_EPOCH}:${OVS_BASE}-${PF9_VERSION}-${PF9_BUILD_ID}"
+PF9_OVS_BUILD_VERSION="${PF9_OVS_PKG_VERSION}${UBUNTU_VERSION:+-${UBUNTU_VERSION}}"
+printf '%s' "$PF9_OVS_PKG_VERSION" >> $TEAMCITY_ROOT/ovn-deb-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
@@ -69,9 +83,12 @@ else
     sed -i "s/${OVS_BASE}-1/$PF9_OVS_BUILD_VERSION/g" "$ROOT/ovs/debian/changelog"
 
     # Python setuptools sanitization (PEP 440)
-    # Strip epoch and +UBUNTU_VERSION before converting to dot-notation, then re-add + for local segment
-    PF9_OVS_PYTHON_VERSION=$(echo "$PF9_OVS_BUILD_VERSION" | sed "s/^1://; s/+[^-]*$//; s/-/./g; s/${OVS_BASE}./${OVS_BASE}+/")
+    # Binary/python version: <base>+pf9.<PF9_VERSION>.<build id> (local segment, dots only)
+    PF9_OVS_PYTHON_VERSION="${OVS_BASE}+pf9.${PF9_VERSION}.${PF9_BUILD_ID}"
     sed -i "s/${OVS_BASE}/$PF9_OVS_PYTHON_VERSION/g" "$ROOT/ovs/configure.ac"
+
+    # Record the pf9-ovs commit in every OVS deb as Pf9-Source-Sha.
+    pf9_stamp_deb_rules "$ROOT/ovs/debian/rules" "$EXPECTED_OVS_SHA"
 
     # Note: Artifacts from make debian-deb usually land in the directory ABOVE the build dir.
     # Since we build in $ROOT/ovs, debs land in $ROOT.
@@ -116,6 +133,33 @@ rm -f build-aux/ltmain.sh
 
 # Build OVN Debs (Artifacts land in parent of $ROOT, i.e., $ROOT/../)
 DEB_BUILD_OPTIONS=nocheck dpkg-buildpackage -b -us -uc
+
+# --- VERIFY the Pf9-Source-Sha stamp ---
+# Every OVN and OVS deb must carry the commit it was built from. Debug-symbol packages
+# are left out; they are not installed on hosts.
+mapfile -t OVN_DEBS < <(ls "$TEAMCITY_ROOT"/ovn-*.deb 2>/dev/null | grep -v -- '-dbgsym_' || true)
+mapfile -t OVS_DEBS < <(ls "$ROOT"/openvswitch-*.deb "$ROOT"/python3-openvswitch_*.deb 2>/dev/null | grep -v -- '-dbgsym_' || true)
+if [ ${#OVN_DEBS[@]} -eq 0 ] || [ ${#OVS_DEBS[@]} -eq 0 ]; then
+    echo "FATAL: found ${#OVN_DEBS[@]} OVN and ${#OVS_DEBS[@]} OVS debs to check for Pf9-Source-Sha" >&2
+    exit 1
+fi
+pf9_verify_deb_stamp "$PF9_OVN_SHA" "${OVN_DEBS[@]}"
+pf9_verify_deb_stamp "$EXPECTED_OVS_SHA" "${OVS_DEBS[@]}"
+echo "Verified Pf9-Source-Sha: OVN ${PF9_OVN_SHA:0:12} on ${#OVN_DEBS[@]} debs, OVS ${EXPECTED_OVS_SHA:0:12} on ${#OVS_DEBS[@]} debs"
+
+# --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
+# dh_strip always generates -dbgsym packages, but Ubuntu's debhelper writes them as
+# *.ddeb, which the *.deb globs below never match, and pf9_build_reset would wipe the OVS
+# ones. When enabled, collect them before anything is deleted.
+if pf9_debug_symbols_enabled; then
+    DBGSYM_DIR="$PF9_DEBUG_DIR/${UBUNTU_VERSION}-dbgsym"
+    rm -rf "$DBGSYM_DIR"
+    mkdir -p "$DBGSYM_DIR"
+    find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 \( -name "*-dbgsym_*.ddeb" -o -name "*-dbgsym_*.deb" \) \
+        -exec mv -v {} "$DBGSYM_DIR" \;
+    ls -la "$DBGSYM_DIR"
+    pf9_pack_debug_symbols
+fi
 
 # Remove bloat packages before artifact collection
 find "$ROOT" "$TEAMCITY_ROOT" -maxdepth 1 -name "*.deb" \

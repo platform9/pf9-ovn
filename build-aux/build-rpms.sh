@@ -19,6 +19,7 @@ dnf install -y \
   desktop-file-utils libbpf-devel libxdp-devel
 
 pf9_git_setup
+pf9_reset_debug_symbols
 
 # Cleanup: Remove previous build artifacts
 if [ -f "$ROOT/Makefile" ]; then
@@ -34,17 +35,50 @@ if [ "$ROCKY_VERSION" != "r10" ]; then
 fi
 
 # --- OVN CONFIGURATION ---
-# RPM Version field does not allow hyphens; use dots throughout
-printf '%s\n' "1:${OVN_BASE}.pf9.${PF9_VERSION}.${BUILD_NUMBER}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+# Version scheme: see build-common.sh. RPM Version/Release cannot contain hyphens, so
+# 2:<base>-<PF9_VERSION>-<build id>-<OS> is spelled Epoch=2, Version=<base>,
+# Release=<PF9_VERSION>.<build id>.<OS>. ovn-rpm-version.txt carries the full
+# epoch:version-release: the role depends on "ovn = <that>", and an RPM "=" dependency
+# with a release only matches that exact release (including the OS tag, r10 is the only
+# RPM platform).
+pf9_set_build_id
+PF9_RPM_RELEASE="${PF9_VERSION}.${PF9_BUILD_ID}"
+printf '%s\n' "${PF9_PKG_EPOCH}:${OVN_BASE}-${PF9_RPM_RELEASE}.${ROCKY_VERSION}" > $TEAMCITY_ROOT/ovn-rpm-version.txt
+
+# The OVN spec's Version is the *package* version (<base>); the source tarball and the
+# unpacked tree keep the binary version from configure.ac (which has ".pf9." in it, see
+# pf9_patch_ovn_binary_version), so point Source/%autosetup at %{pf9binver}.
+sed -i \
+    -e "s/^Epoch: 1$/Epoch: ${PF9_PKG_EPOCH}/" \
+    -e "s/^Version: @VERSION@$/%define pf9binver @VERSION@\nVersion: ${OVN_BASE}/" \
+    -e "s/^Release: 1%{?dist}$/Release: ${PF9_RPM_RELEASE}.${ROCKY_VERSION}/" \
+    -e 's/^Source: \(.*\)ovn-%{version}\.tar\.gz$/Source: \1ovn-%{pf9binver}.tar.gz/' \
+    -e 's/^%autosetup -n ovn-%{version} /%autosetup -n ovn-%{pf9binver} /' \
+    "$ROOT/rhel/ovn-fedora.spec.in"
+grep -q '^Version: '"${OVN_BASE}"'$' "$ROOT/rhel/ovn-fedora.spec.in" \
+    && grep -q '^Release: '"${PF9_RPM_RELEASE}.${ROCKY_VERSION}"'$' "$ROOT/rhel/ovn-fedora.spec.in" \
+    && grep -q 'ovn-%{pf9binver}.tar.gz' "$ROOT/rhel/ovn-fedora.spec.in" \
+    && grep -q '^%autosetup -n ovn-%{pf9binver} ' "$ROOT/rhel/ovn-fedora.spec.in" \
+    || { echo "FATAL: could not rewrite rhel/ovn-fedora.spec.in version fields (spec changed?)" >&2; exit 1; }
+
+# Record the commit this OVN was built from in every OVN rpm, as pf9-source-sha(<sha>)
+# (OVS gets its own commit, below).
+PF9_OVN_SHA=$(git -C "$ROOT" rev-parse HEAD) || {
+    echo "Unable to determine the pf9-ovn commit"
+    exit 1
+}
+pf9_stamp_rpm_spec "$ROOT/rhel/ovn-fedora.spec.in" "$PF9_OVN_SHA"
 
 # configure.ac gets the dot-separated binary version (no OS suffix)
 # RPM package OS indicator comes from %{?dist} macro automatically (e.g. .el10)
 pf9_patch_ovn_binary_version
 
 # --- OVS CONFIGURATION ---
-# Static version (no build counter): only bump manually when OVS code changes
-PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9
-printf '%s' "1:$PF9_OVS_BUILD_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
+# Same scheme as OVN. PF9_OVS_BUILD_VERSION is the binary/tarball version (".pf9." kept);
+# PF9_OVS_PKG_VERSION is the package epoch:version-release.
+PF9_OVS_BUILD_VERSION=${OVS_BASE}.pf9.${PF9_VERSION}.${PF9_BUILD_ID}
+PF9_OVS_PKG_VERSION="${PF9_PKG_EPOCH}:${OVS_BASE}-${PF9_RPM_RELEASE}.${ROCKY_VERSION}"
+printf '%s' "$PF9_OVS_PKG_VERSION" >> $TEAMCITY_ROOT/ovn-rpm-version.txt
 
 # --- BUILD OVS (or reuse a prebuilt tree) ---
 # try the OVS cache before paying for a full rebuild. On a miss do a submodule update, changelog and
@@ -63,8 +97,23 @@ else
     # Update OVS configure.ac
     sed -i "s/${OVS_BASE}/${PF9_OVS_BUILD_VERSION}/g" "$ROOT/ovs/configure.ac"
 
-    # Inject Epoch: 1 into the OVS spec on the fly (submodule is not tracked)
-    sed -i 's/^Version: @VERSION@/Epoch: 1\nVersion: @VERSION@/' "$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+    # Rewrite the OVS spec on the fly (submodule is not tracked): Epoch, Version=<base>,
+    # Release=<PF9_VERSION>.<build id>.<OS>; the tarball/tree keep the binary version.
+    OVS_SPEC="$ROOT/ovs/rhel/openvswitch-fedora.spec.in"
+    sed -i \
+        -e "s/^Version: @VERSION@\$/Epoch: ${PF9_PKG_EPOCH}\n%define pf9binver @VERSION@\nVersion: ${OVS_BASE}/" \
+        -e "s/^Release: %{release_number}%{?dist}\$/Release: ${PF9_RPM_RELEASE}.${ROCKY_VERSION}/" \
+        -e 's/^Source: \(.*\)%{name}-%{version}\.tar\.gz$/Source: \1%{name}-%{pf9binver}.tar.gz/' \
+        -e 's/^%setup -q$/%setup -q -n %{name}-%{pf9binver}/' \
+        "$OVS_SPEC"
+    grep -q '^Epoch: '"${PF9_PKG_EPOCH}"'$' "$OVS_SPEC" \
+        && grep -q '^Release: '"${PF9_RPM_RELEASE}.${ROCKY_VERSION}"'$' "$OVS_SPEC" \
+        && grep -q '%{name}-%{pf9binver}.tar.gz' "$OVS_SPEC" \
+        && grep -q '^%setup -q -n %{name}-%{pf9binver}$' "$OVS_SPEC" \
+        || { echo "FATAL: could not rewrite $OVS_SPEC version fields (spec changed?)" >&2; exit 1; }
+
+    # Record the pf9-ovs commit in every OVS rpm as pf9-source-sha(<sha>).
+    pf9_stamp_rpm_spec "$OVS_SPEC" "$EXPECTED_OVS_SHA"
 
     ( cd "$ROOT/ovs" && ./boot.sh )
     ( cd "$ROOT/ovs" && ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc --enable-ssl )
@@ -82,12 +131,39 @@ cd "$ROOT"
 
 OVSDIR=$ROOT/ovs
 OVSBUILDDIR="$OVSDIR"
-export OVSDIR OVSBUILDDIR OVSVERSION=${OVS_BASE}
+export OVSDIR OVSBUILDDIR OVSVERSION=${PF9_OVS_BUILD_VERSION}
 
 ./configure --prefix=/usr --localstatedir=/var --sysconfdir=/etc \
     --with-ovs-source="$OVSDIR"
 
 make rpm-fedora RPMBUILD_OPT="--without check"
+
+# --- VERIFY the pf9-source-sha stamp ---
+# Every OVN and OVS rpm must provide the commit it was built from. Debug-symbol packages
+# are left out; they are not installed on hosts and have no Summary to stamp.
+mapfile -t OVN_RPMS < <(find "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" ! -name "*-debuginfo-*" ! -name "*-debugsource-*")
+mapfile -t OVS_RPMS < <(find "$ROOT/ovs/rpm/rpmbuild/RPMS" -name "*.rpm" ! -name "*-debuginfo-*" ! -name "*-debugsource-*")
+if [ ${#OVN_RPMS[@]} -eq 0 ] || [ ${#OVS_RPMS[@]} -eq 0 ]; then
+    echo "FATAL: found ${#OVN_RPMS[@]} OVN and ${#OVS_RPMS[@]} OVS rpms to check for pf9-source-sha" >&2
+    exit 1
+fi
+pf9_verify_rpm_stamp "$PF9_OVN_SHA" "${OVN_RPMS[@]}"
+pf9_verify_rpm_stamp "$EXPECTED_OVS_SHA" "${OVS_RPMS[@]}"
+echo "Verified pf9-source-sha: OVN ${PF9_OVN_SHA:0:12} on ${#OVN_RPMS[@]} rpms, OVS ${EXPECTED_OVS_SHA:0:12} on ${#OVS_RPMS[@]} rpms"
+
+# --- DEBUG SYMBOLS (on unless PF9_DEBUG_SYMBOLS=false) ---
+# rpmbuild generates -debuginfo/-debugsource RPMs; normally they are deleted below.
+# When enabled, copy them aside first.
+if pf9_debug_symbols_enabled; then
+    DEBUGINFO_DIR="$PF9_DEBUG_DIR/${ROCKY_VERSION}-debuginfo"
+    rm -rf "$DEBUGINFO_DIR"
+    mkdir -p "$DEBUGINFO_DIR"
+    find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \
+        \( -name "*-debuginfo-*" -o -name "*-debugsource-*" \) \
+        -exec cp -v {} "$DEBUGINFO_DIR" \;
+    ls -la "$DEBUGINFO_DIR"
+    pf9_pack_debug_symbols
+fi
 
 # Remove bloat packages before artifact collection
 find "$ROOT/ovs/rpm/rpmbuild/RPMS" "$ROOT/rpm/rpmbuild/RPMS" -name "*.rpm" \

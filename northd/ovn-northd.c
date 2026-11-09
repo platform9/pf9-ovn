@@ -861,6 +861,8 @@ main(int argc, char *argv[])
     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl, &nbrec_nb_global_col_hv_cfg);
     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
                          &nbrec_nb_global_col_hv_cfg_timestamp);
+    ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
+                         &nbrec_logical_router_port_col_status);
 
     unixctl_command_register("nb-connection-status", "", 0, 0,
                              ovn_conn_show, ovnnb_idl_loop.idl);
@@ -901,6 +903,10 @@ main(int argc, char *argv[])
     for (size_t i = 0; i < SBREC_LOGICAL_DP_GROUP_N_COLUMNS; i++) {
         ovsdb_idl_omit_alert(ovnsb_idl_loop.idl,
                              &sbrec_logical_dp_group_columns[i]);
+    }
+    for (size_t i = 0; i < SBREC_STATIC_MAC_BINDING_N_COLUMNS; i++) {
+        ovsdb_idl_omit_alert(ovnsb_idl_loop.idl,
+                             &sbrec_static_mac_binding_columns[i]);
     }
 
     unixctl_command_register("sb-connection-status", "", 0, 0,
@@ -1027,6 +1033,22 @@ main(int argc, char *argv[])
                     clear_idl_track = false;
                 }
 
+                /* Make sure we don't bump the next_cfg when we shouldn't.
+                 * This should prevent ovn-nbctl sync calls to return before
+                 * the SB updates are actually done.
+                 *
+                 * Track that the abort was intentional so we can distinguish
+                 * it from a real commit failure below; otherwise the abort
+                 * would feed back into the force-recompute path, creating a
+                 * busy loop whenever NB.nb_cfg keeps advancing but the
+                 * engine produces no SB activity. */
+                bool ovnsb_txn_aborted_intentionally = false;
+                if (!activity && ovnsb_txn &&
+                    ovnsb_idl_loop.cur_cfg != ovnsb_idl_loop.next_cfg) {
+                    ovsdb_idl_txn_abort(ovnsb_txn);
+                    ovnsb_txn_aborted_intentionally = true;
+                }
+
                 /* If there are any errors, we force a full recompute in order
                  * to ensure we handle all changes. */
                 if (!ovsdb_idl_loop_commit_and_wait(&ovnnb_idl_loop)) {
@@ -1035,7 +1057,8 @@ main(int argc, char *argv[])
                     inc_proc_northd_force_recompute_immediate();
                 }
 
-                if (!ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop)) {
+                if (!ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop) &&
+                    !ovnsb_txn_aborted_intentionally) {
                     VLOG_INFO("OVNSB commit failed, "
                               "force recompute next time.");
                     inc_proc_northd_force_recompute_immediate();

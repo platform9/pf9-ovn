@@ -166,12 +166,13 @@ AT_CHECK([ovs-vsctl remove Open_vSwitch . external-ids ovn-bridge-mappings])
 check_bridge_mappings
 check_patches
 
-# Gracefully terminate daemons
+# Gracefully terminate daemons.
 OVN_CLEANUP_SBOX([hv])
-OVN_CLEANUP_VSWITCH([main])
+
 as ovn-sb
 OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 
+OVN_CLEANUP_VSWITCH([main])
 AT_CLEANUP
 ])
 
@@ -274,7 +275,7 @@ ovs-vsctl -- set Open_vSwitch . external-ids:hostname="${sysid}" \
           -- set Open_vSwitch . external-ids:ovn-remote="${current_remote}"
 
 OVS_WAIT_UNTIL([
-    grep -q 'Transaction causes multiple rows in \\"Encap\\" table to have identical values' hv/ovn-controller.log
+    grep -q "'hv' already has encap ip '192.168.0.1' and type '.*', cannot duplicate on 'hv-foo'" hv/ovn-controller.log
 ])
 
 # Destroy the stale entries manually and ovn-controller should now be able
@@ -296,16 +297,13 @@ wait_row_count Chassis 1
 # - could not create datapath br-int of unknown type foobar
 # - unknown datapath type bar
 # - could not create datapath br-int of unknown type bar
-# - Transaction causes multiple rows ...
 # - failed to create bridge br-int: Address family not supported by protocol # due to previous errors.
-OVN_CLEANUP_SBOX([hv], ["/foo/d
+# - 'hv' already has encap ip '192.168.0.1' and type 'geneve', cannot duplicate on 'hv-foo'
+OVN_CLEANUP([hv
+/foo/d
 /bar/d
-/Transaction causes multiple rows/d
-/failed to create bridge/d"])
-
-OVN_CLEANUP_VSWITCH([main])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+/already has encap ip.*cannot duplicate on/d
+/failed to create bridge/d])
 
 AT_CLEANUP
 ])
@@ -375,14 +373,7 @@ OVS_WAIT_UNTIL([check_tunnel_property options:local_ip "\"192.168.0.1\""])
 ovs-vsctl set interface ovn-fakech-0 options:local_ip="1.1.1.1"
 OVS_WAIT_UNTIL([check_tunnel_property options:local_ip "\"192.168.0.1\""])
 
-# Gracefully terminate daemons
-OVN_CLEANUP_SBOX([hv])
-OVN_CLEANUP_VSWITCH([main])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
+OVN_CLEANUP([hv])
 AT_CLEANUP
 ])
 
@@ -408,19 +399,13 @@ check_sbdb_connection () {
 
 OVS_WAIT_UNTIL([check_sbdb_connection connected])
 
-ovs-vsctl set open . external_ids:ovn-remote=tcp:192.168.0.10:6642
+ovs-vsctl set open . external_ids:ovn-remote=tcp:127.0.0.1:12345
 OVS_WAIT_UNTIL([check_sbdb_connection 'not connected'])
 
 # reset the remote for clean-up
 ovs-vsctl set open . external_ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock
-# Gracefully terminate daemons
-OVN_CLEANUP_SBOX([hv])
-OVN_CLEANUP_VSWITCH([main])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 
+OVN_CLEANUP([hv])
 AT_CLEANUP
 ])
 
@@ -446,14 +431,7 @@ check ovn-sbctl chassis-del hv
 # ovn-controller should recreate its chassis row.
 OVS_WAIT_UNTIL([test xhv = x`ovn-sbctl --columns name --bare find chassis`])
 
-# Gracefully terminate daemons
-OVN_CLEANUP_SBOX([hv])
-OVN_CLEANUP_VSWITCH([main])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
+OVN_CLEANUP([hv])
 AT_CLEANUP
 
 # Checks that ovn-controller increments the nb_cfg value in the Chassis_Private table
@@ -831,6 +809,7 @@ OVN_CLEANUP([hv1
 /Certificate must be configured to use SSL/d
 /SSL_read: error/d
 /receive error: Input/d
+/receive error: I\/O error/d
 /connection dropped/d
 ])
 AT_CLEANUP
@@ -868,7 +847,7 @@ check ovn-nbctl meter-add event-elb drop 100 pktps 10
 check ovn-nbctl --wait=hv copp-add copp0 event-elb event-elb
 check ovn-nbctl --wait=hv ls-copp-add copp0 ls1
 
-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.0f | grep -q meter_id=1])
+AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.0f | grep -q meter_id=1], [0], [], [ignore])
 
 check ovn-nbctl copp-del copp0
 AT_CHECK([ovn-nbctl copp-list copp0], [0], [dnl
@@ -881,13 +860,13 @@ check ovn-nbctl --wait=hv copp-add copp1 reject acl-meter
 check ovn-nbctl ls-copp-add copp1 ls1
 check ovn-nbctl --wait=hv acl-add ls1 from-lport 1002 'inport == "lsp1" && ip && udp' reject
 
-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.16 | grep -q meter_id=1])
+AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.16 | grep -q meter_id=1], [0], [], [ignore])
 
 # arp metering
 check ovn-nbctl meter-add arp-meter drop 200 pktps 0
 check ovn-nbctl --wait=hv copp-add copp2 arp-resolve arp-meter
 check ovn-nbctl --wait=hv lr-copp-add copp2 lr1
-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.00 | grep -q meter_id=2])
+AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.00 | grep -q meter_id=2], [0], [], [ignore])
 
 OVN_CLEANUP([hv1])
 AT_CLEANUP
@@ -961,12 +940,8 @@ AT_CHECK([test "$tos_option" = "$no_tos_options"], [0], [])
 
 # Gracefully terminate daemons
 # Expect invalid TOS 61
-OVN_CLEANUP_SBOX([hv], ["/invalid TOS 61/d"])
-OVN_CLEANUP_VSWITCH([main])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+OVN_CLEANUP([hv
+/invalid TOS 61/d])
 
 AT_CLEANUP
 ])
@@ -985,17 +960,11 @@ ovn_attach n1 br-phys 192.168.0.1
 check ovn-nbctl lr-add lr0 \
     -- lrp-add lr0 rp-ls0 00:00:01:01:02:02 192.168.0.254/24 \
     -- ls-add ls0 \
-    -- lsp-add ls0 ls0-rp \
-    -- lsp-set-type ls0-rp router \
-    -- lsp-set-addresses ls0-rp router \
-    -- lsp-set-options ls0-rp router-port=rp-ls0 \
+    -- lsp-add-router-port ls0 ls0-rp rp-ls0 \
     -- lsp-add ls0 lsp0 \
     -- lsp-set-addresses lsp0 "00:11:00:00:00:01 192.168.0.1" \
     -- ls-add ls1 \
-    -- lsp-add ls1 ls1-rp \
-    -- lsp-set-type ls1-rp router \
-    -- lsp-set-addresses ls1-rp router \
-    -- lsp-set-options ls1-rp router-port=rp-ls1 \
+    -- lsp-add-router-port ls1 ls1-rp rp-ls1 \
     -- lsp-add ls1 lsp1 \
     -- lsp-set-addresses lsp1 "00:00:00:00:00:01 192.168.1.1"
 
@@ -1526,7 +1495,7 @@ for i in $(seq 10); do
     check ovn-nbctl --wait=hv sync
     if test "$i" = 9; then
         AT_CHECK_UNQUOTED([ovs-ofctl dump-flows br-int table=46,reg15=0x$port_key | \
-            grep -v reply | awk '{print $7, $8}'], [0], [dnl
+            grep -v reply | awk '{print $7, $8}' | sort], [0], [dnl
 priority=1100,ip,reg15=0x$port_key,metadata=0x$dp_key,nw_src=10.0.0.10,nw_dst=10.0.0.6 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,47)
 priority=1100,ip,reg15=0x$port_key,metadata=0x$dp_key,nw_src=10.0.0.10,nw_dst=10.0.0.7 actions=load:0x1->OXM_OF_PKT_REG4[[49]],resubmit(,47)
 ])
@@ -2050,6 +2019,58 @@ AT_CHECK([echo $(($reprocess_count_new - $reprocess_count_old))], [0], [2
 OVN_CLEANUP([hv1])
 AT_CLEANUP
 
+AT_SETUP([ovn-controller - I-P for address set update: handle duplicate addresses])
+AT_KEYWORDS([as-i-p])
+
+ovn_start
+
+net_add n1
+sim_add hv1
+as hv1
+check ovs-vsctl add-br br-phys
+ovn_attach n1 br-phys 192.168.0.1
+check ovs-vsctl -- add-port br-int hv1-vif1 -- \
+    set interface hv1-vif1 external-ids:iface-id=ls1-lp1
+
+check ovn-nbctl ls-add ls1
+
+check ovn-nbctl lsp-add ls1 ls1-lp1 \
+-- lsp-set-addresses ls1-lp1 "f0:00:00:00:00:01"
+
+wait_for_ports_up
+ovn-appctl -t ovn-controller vlog/set file:dbg
+
+# Initial state:
+# 2 ASes, each has 3 IPs, no duplicates.
+check_uuid ovn-nbctl create address_set name=as1 addresses=10.0.0.1,10.0.0.2,10.0.0.3
+check_uuid ovn-nbctl create address_set name=as2 addresses='["::1","::2","::3"]'
+check ovn-nbctl acl-add ls1 to-lport 100 'outport == "ls1-lp1" && ip4.src == $as1 && tcp && tcp.dst == {101, 102}' drop
+check ovn-nbctl acl-add ls1 to-lport 100 'outport == "ls1-lp1" && ip6.src == $as2 && tcp && tcp.dst == {201, 202}' drop
+
+check ovn-nbctl --wait=hv sync
+
+# Add duplicate IP, then remove it again.
+# This should generate a warning, but should not crash.
+check ovn-nbctl add address_set as1 addresses 10.0.0.1/32
+check ovn-nbctl --wait=hv sync
+check ovn-nbctl remove address_set as1 addresses 10.0.0.1/32
+check ovn-nbctl --wait=hv sync
+
+AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "nw_src=10.0.0.1"], [0], [], [ignore])
+
+# Same for duplicate IPv6 addresses.
+check ovn-nbctl add address_set as2 addresses '["::01"]'
+check ovn-nbctl --wait=hv sync
+check ovn-nbctl remove address_set as2 addresses '["::01"]'
+check ovn-nbctl --wait=hv sync
+
+AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "ipv6_src=::1"], [0], [], [ignore])
+
+OVN_CLEANUP([hv1
+/already references desired flow/d
+])
+AT_CLEANUP
+
 AT_SETUP([ovn-controller - I-P for address set update: mac])
 AT_KEYWORDS([as-i-p])
 
@@ -2439,8 +2460,8 @@ AT_CHECK([ovn-nbctl --wait=hv sync])
 # Check if ovn-controller is still alive
 AT_CHECK([ps $pid], [0], [ignore])
 # Check if we got warnings for invalid
-AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid1])
-AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid2])
+AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid1], [0], [], [ignore])
+AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid2], [0], [], [ignore])
 AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q br1], [1])
 
 OVN_CLEANUP([hv1
@@ -2530,32 +2551,17 @@ check ovn-nbctl ls-add ls1 \
     -- lsp-set-addresses lsp1 "f0:00:00:00:00:01 10.0.1.2"
 check ovn-nbctl lr-add lr1 \
     -- lrp-add lr1 lrp-lr1-ls1 f0:00:aa:00:01:01 10.0.1.1/24 \
-    -- lsp-add ls1 lsp-ls1-lr1 \
-    -- lsp-set-type lsp-ls1-lr1 router \
-    -- lsp-set-options lsp-ls1-lr1 router-port=lrp-lr1-ls1 \
-    -- lsp-set-addresses lsp-ls1-lr1 router
+    -- lsp-add-router-port ls1 lsp-ls1-lr1 lrp-lr1-ls1
 check ovn-nbctl ls-add ls2 \
     -- lrp-add lr1 lrp-lr1-ls2 f0:00:aa:00:01:02 10.0.2.1/24 \
-    -- lsp-add ls2 lsp-ls2-lr1 \
-    -- lsp-set-type lsp-ls2-lr1 router \
-    -- lsp-set-options lsp-ls2-lr1 router-port=lrp-lr1-ls2 \
-    -- lsp-set-addresses lsp-ls2-lr1 router
+    -- lsp-add-router-port ls2 lsp-ls2-lr1 lrp-lr1-ls2
 check ovn-nbctl lr-add lr2 \
     -- lrp-add lr2 lrp-lr2-ls2 f0:00:aa:00:02:02 10.0.2.2/24 \
-    -- lsp-add ls2 lsp-ls2-lr2 \
-    -- lsp-set-type lsp-ls2-lr2 router \
-    -- lsp-set-options lsp-ls2-lr2 router-port=lrp-lr2-ls2 \
-    -- lsp-set-addresses lsp-ls2-lr2 router
+    -- lsp-add-router-port ls2 lsp-ls2-lr2 lrp-lr2-ls2
 check ovn-nbctl ls-add ls-ext \
     -- lrp-add lr2 lrp-lr2-ext f0:00:aa:00:02:03 10.0.3.1/24 \
-    -- lsp-add ls-ext lsp-ext-lr2 \
-    -- lsp-set-type lsp-ext-lr2 router \
-    -- lsp-set-options lsp-ext-lr2 router-port=lrp-lr2-ext \
-    -- lsp-set-addresses lsp-ext-lr2 router
-check ovn-nbctl lsp-add ls-ext lsp-ext \
-    -- lsp-set-type lsp-ext localnet \
-    -- lsp-set-options lsp-ext network_name=extnet \
-    -- lsp-set-addresses lsp-ext unknown
+    -- lsp-add-router-port ls-ext lsp-ext-lr2 lrp-lr2-ext
+check ovn-nbctl lsp-add-localnet-port ls-ext lsp-ext extnet
 check ovn-nbctl --wait=hv sync
 
 AT_CHECK([ovs-vsctl list-ports br-int | grep patch-br-int-to-lsp-ext], [0], [ignore])
@@ -2732,6 +2738,7 @@ name: 'foo' value: 'foo-hv'
 check ovn-nbctl --wait=hv remove Chassis_Template_Var hv variables foo
 AT_CHECK([GET_LOCAL_TEMPLATE_VARS], [1], [])
 
+OVN_CLEANUP([hv])
 AT_CLEANUP
 ])
 
@@ -2758,6 +2765,7 @@ zone_num=$(printf "$ct_zones" | grep lr0_snat | cut -d ' ' -f 2)
 
 check test "$zone_num" -eq 666
 
+OVN_CLEANUP([hv1])
 AT_CLEANUP
 ])
 
@@ -2831,57 +2839,6 @@ OVS_WAIT_FOR_OUTPUT([as hv1 ovs-ofctl dump-flows br-int table=0 | grep -c in_por
 ])
 
 OVN_CLEANUP([hv1])
-AT_CLEANUP
-])
-
-OVN_FOR_EACH_NORTHD([
-AT_SETUP([ovn-controller - multicast group buffer split])
-AT_KEYWORDS([ovn])
-ovn_start
-
-net_add n1
-
-sim_add hv1
-as hv1
-ovs-vsctl add-br br-phys
-ovn_attach n1 br-phys 192.168.0.1
-
-for i in $(seq 1 320); do
-    OVS_VSCTL(add-port br-int hv1-vif$i -- \
-        set interface hv1-vif$i external-ids:iface-id=sw0-p$i \
-        options:tx_pcap=hv1/vif${i}-tx.pcap \
-        options:rxq_pcap=hv1/vif${i}-rx.pcap \
-        ofport-request=$i)
-done
-RUN_OVS_VSCTL
-
-check ovn-nbctl ls-add sw0
-for i in $(seq 1 320); do
-    OVN_NBCTL(lsp-add sw0 sw0-p$i)
-    OVN_NBCTL(lsp-set-addresses sw0-p$i "unknown")
-done
-RUN_OVN_NBCTL
-
-wait_for_ports_up
-ovn-nbctl --wait=hv sync
-
-OVS_WAIT_FOR_OUTPUT([as hv1 ovs-ofctl dump-flows br-int table=40 | grep reg15=0x8000,metadata=0x1 | grep -c "controller(userdata=00.00.00.1b"], [0],[dnl
-3
-])
-
-for i in $(seq 1 280); do
-    OVN_NBCTL(lsp-del sw0-p$i)
-done
-RUN_OVN_NBCTL
-ovn-nbctl --wait=hv sync
-
-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int table=40 | grep -q controller], [1])
-
-# Since we add many ports in one nbctl command, we might get some warnings on slow systems.
-OVN_CLEANUP([hv1
-/Unreasonably long/d
-/faults:/d
-/context switches/d])
 AT_CLEANUP
 ])
 
@@ -3196,5 +3153,68 @@ priority=100,reg14=0x2,metadata=0x1 actions=load:0x?->NXM_NX_REG13[[0..15]],load
 ])
 
 OVN_CLEANUP([hv1])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ovn-controller - two chassis set same encap ip and type])
+AT_KEYWORDS([ovn])
+ovn_start
+net_add n1
+
+sim_add hv1
+as hv1
+check ovs-vsctl add-br br-phys
+ovn_attach n1 br-phys 192.168.0.11
+
+sim_add hv2
+as hv2
+check ovs-vsctl add-br br-phys
+ovn_attach n1 br-phys 192.168.0.12
+
+# Wait for tunnels to appear in OVS, encaps to appear in sb-db, and set
+# controller's jsonrpc debug logging.
+as hv2
+OVS_WAIT_FOR_OUTPUT([ovs-vsctl find Interface type=geneve | grep -c _uuid], [0], [1
+])
+wait_row_count Encap 4
+as hv1
+OVS_WAIT_FOR_OUTPUT([ovs-vsctl find Interface type=geneve | grep -c _uuid], [0], [1
+])
+wait_row_count Encap 4
+ovn-appctl vlog/set jsonrpc:dbg
+as hv2
+ovn-appctl vlog/set jsonrpc:dbg
+
+# Give hv2 the same encap IP as hv1 (.11) with other valid IPs.
+as hv2 check ovs-vsctl set Open_vSwitch . \
+    external-ids:ovn-encap-ip="192.168.0.10,192.168.0.11,192.168.0.12,192.168.0.13"
+
+as hv1 wait_row_count Encap 2 chassis_name="hv1"
+
+# Make sure tunnels are created for the other three valid IPs configured.
+as hv2
+OVS_WAIT_FOR_OUTPUT([ovs-vsctl find Interface type=geneve | grep -c _uuid], [0], [3
+])
+wait_row_count Encap 6 chassis_name="hv2"
+OVS_WAIT_UNTIL([
+    grep -q "'hv1' already has encap ip '192.168.0.11' and type '.*', cannot duplicate on 'hv2'" hv2/ovn-controller.log
+])
+
+# Make sure controller logs have correct number of transactions.
+OVS_WAIT_FOR_OUTPUT([grep -c "transact" hv2/ovn-controller.log], [0], [2
+])
+OVS_WAIT_FOR_OUTPUT([grep -c "transact" hv1/ovn-controller.log], [0], [1
+])
+
+# Now set hv2's encap IP to hv1's, and since there is no valid encap IP
+# configured on hv2 now, controller should delete the chassis record.
+as hv2
+check ovs-vsctl set Open_vSwitch . external-ids:ovn-encap-ip="192.168.0.11"
+wait_row_count Chassis 0 name="hv2"
+wait_row_count Chassis_Private 0 name="hv2"
+
+OVN_CLEANUP([hv1], [hv2
+/already has encap ip.*cannot duplicate on/d])
 AT_CLEANUP
 ])

@@ -122,6 +122,7 @@ David Yang                         davidy@vmware.com
 Dennis Sam                         dsam@arista.com
 Devendra Naga                      devendra.aaru@gmail.com
 Dmitry Krivenok                    krivenok.dmitry@gmail.com
+Dmitry Mityugov                    dmitry.mityugov@gmail.com
 Dominic Curran                     dominic.curran@citrix.com
 Dongdong                           dongdong1@huawei.com
 Dongjun                            dongj@dtdream.com
@@ -387,6 +388,7 @@ Thomas F. Herbert                  thomasfherbert@gmail.com
 Thomas Goirand                     zigo@debian.org
 Thomas Graf                        tgraf@noironetworks.com
 Thomas Lacroix                     thomas.lacroix@citrix.com
+Tiago Pires                        tiago.pires@luizalabs.com
 Tim Rozet                          trozet@redhat.com
 Timo Puha                          timox.puha@intel.com
 Timothy Redaelli                   tredaelli@redhat.com

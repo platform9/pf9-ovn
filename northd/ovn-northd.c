@@ -884,7 +884,6 @@ main(int argc, char *argv[])
         &nbrec_connection_col_external_ids,
         &nbrec_copp_col_external_ids,
         &nbrec_dhcp_options_col_external_ids,
-        &nbrec_dhcp_relay_col_external_ids,
         &nbrec_dns_col_external_ids,
         &nbrec_forwarding_group_col_external_ids,
         &nbrec_gateway_chassis_col_external_ids,
@@ -902,8 +901,6 @@ main(int argc, char *argv[])
         &nbrec_port_group_col_external_ids,
         &nbrec_qos_col_external_ids,
         &nbrec_ssl_col_external_ids,
-        &nbrec_sample_collector_col_external_ids,
-        &nbrec_sampling_app_col_external_ids,
     };
     for (size_t i = 0; i < ARRAY_SIZE(external_ids); i++) {
         ovsdb_idl_omit(ovnnb_idl_loop.idl, external_ids[i]);

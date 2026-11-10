@@ -41,8 +41,11 @@ RUN --mount=type=bind,source=debug/u24-dbgsym,target=/tmp/dbgsym \
     done \
  && rm -rf /var/lib/apt/lists/*
 
+# curl -O saves kubectl in the working directory (/ here) and install copies it, so
+# delete the download in the same step or the image keeps a second 62 MB copy.
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
-  && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+  && install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl \
+  && rm -f kubectl
  
 COPY  ovn-kube-util /usr/bin/
 

@@ -14011,3 +14011,227 @@ AT_CHECK([echo $call_seq | grep -qE "^I*uuI*$"], [0])
 
 AT_CLEANUP
 ])
+
+OVN_FOR_EACH_NORTHD_NO_HV([
+AT_SETUP([SB DNS - same UUID as NB DNS])
+ovn_start
+
+check ovn-nbctl ls-add sw0
+check ovn-nbctl ls-add sw1
+dns1=$(ovn-nbctl create DNS records:vm1.ovn.org=10.0.0.4)
+dns2=$(ovn-nbctl create DNS records:vm2.ovn.org=10.0.0.5)
+check ovn-nbctl set Logical_Switch sw0 dns_records="$dns1"
+check ovn-nbctl --wait=sb set Logical_Switch sw1 dns_records="$dns2"
+
+# Each SB DNS row reuses the UUID of the NB DNS row it is built from and no
+# longer carries the NB UUID in external_ids:dns_id.
+wait_row_count sb:DNS 2
+sb_dns_uuids() {
+    ovn-sbctl --bare --columns=_uuid list DNS | grep -v '^$' | sort
+}
+printf '%s\n' $dns1 $dns2 | sort > expected_uuids
+AT_CHECK([sb_dns_uuids | diff -u expected_uuids -])
+AT_CHECK([ovn-sbctl get DNS $dns1 external_ids], [0], [dnl
+{}
+])
+AT_CHECK([ovn-sbctl get DNS $dns1 records:vm1.ovn.org], [0], [dnl
+"10.0.0.4"
+])
+
+# Updating the NB record updates the same SB row in place.
+check ovn-nbctl --wait=sb set DNS $dns1 records:vm3.ovn.org=10.0.0.6
+check_row_count sb:DNS 2
+AT_CHECK([ovn-sbctl get DNS $dns1 records:vm3.ovn.org], [0], [dnl
+"10.0.0.6"
+])
+
+# Upgrade from a northd that used random SB UUIDs plus external_ids:dns_id:
+# replace the SB row of dns1 by one in the old format and check that northd
+# swaps it for a row with the NB UUID.
+sw0_dp=$(fetch_column sb:Datapath_Binding _uuid external_ids:name=sw0)
+check as northd ovn-appctl -t ovn-northd pause
+check ovn-sbctl destroy DNS $dns1
+old_uuid=$(ovn-sbctl create DNS records:vm1.ovn.org=10.0.0.4 \
+           datapaths=$sw0_dp external_ids:dns_id=$dns1)
+AT_CHECK([sb_dns_uuids | grep -c $old_uuid], [0], [dnl
+1
+])
+check as northd ovn-appctl -t ovn-northd resume
+check as northd ovn-appctl -t ovn-northd inc-engine/recompute
+check ovn-nbctl --wait=sb sync
+OVS_WAIT_UNTIL([sb_dns_uuids | diff -u expected_uuids -])
+AT_CHECK([ovn-sbctl get DNS $dns1 records:vm3.ovn.org], [0], [dnl
+"10.0.0.6"
+])
+
+# Removing the NB record removes the SB row.
+check ovn-nbctl --wait=sb clear Logical_Switch sw0 dns_records
+wait_row_count sb:DNS 1
+AT_CHECK([test "$(sb_dns_uuids)" = "$dns2"])
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD_NO_HV([
+AT_SETUP([NB external_ids - monitored only for switches, routers and ports])
+ovn_start
+
+check ovn-nbctl ls-add sw0
+check ovn-nbctl lsp-add sw0 sw0-p1
+check ovn-nbctl lsp-set-addresses sw0-p1 "00:00:00:00:00:02 10.0.0.2"
+check ovn-nbctl lr-add lr0
+check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
+check ovn-nbctl lsp-add sw0 sw0-lr0
+check ovn-nbctl lsp-set-type sw0-lr0 router
+check ovn-nbctl lsp-set-addresses sw0-lr0 router
+check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl pg-add pg0 sw0-p1
+check ovn-nbctl acl-add pg0 from-lport 1001 'inport == @pg0 && ip4' allow
+check ovn-nbctl lr-nat-add lr0 snat 172.16.0.1 10.0.0.0/24
+check ovn-nbctl lb-add lb0 10.0.0.100:80 10.0.0.2:80
+check ovn-nbctl ls-lb-add sw0 lb0
+dns=$(ovn-nbctl create DNS records:vm1.ovn.org=10.0.0.2)
+check ovn-nbctl set Logical_Switch sw0 dns_records="$dns"
+check ovn-nbctl --wait=sb sync
+
+acl=$(fetch_column nb:ACL _uuid priority=1001)
+nat=$(fetch_column nb:NAT _uuid external_ip=172.16.0.1)
+lb=$(fetch_column nb:Load_Balancer _uuid name=lb0)
+pg=$(fetch_column nb:Port_Group _uuid name=pg0)
+
+# Neutron tags most NB rows through external_ids.  Changes to those must not
+# wake ovn-northd up, with the exception of the tables checked further down.
+check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
+check ovn-nbctl set ACL $acl external_ids:sg_rule=rule1
+check ovn-nbctl set Port_Group $pg external_ids:sg=sg1
+check ovn-nbctl set NAT $nat external_ids:fip=fip1
+check ovn-nbctl set Load_Balancer $lb external_ids:lb=octavia1
+check ovn-nbctl set DNS $dns external_ids:ls_name=sw0
+check ovn-nbctl set NB_Global . external_ids:liveness=1
+check ovn-nbctl --wait=sb sync
+check_engine_stats northd norecompute nocompute
+check_engine_stats lflow norecompute nocompute
+
+# The values are still stored in the NB database for the CMS to read back.
+AT_CHECK([ovn-nbctl get ACL $acl external_ids:sg_rule], [0], [dnl
+rule1
+])
+
+# external_ids of switch and router ports are still copied to the SB
+# Port_Binding (the Neutron metadata agent reads them there).
+check ovn-nbctl --wait=sb set Logical_Switch_Port sw0-p1 \
+    external_ids:device_id=vm1
+AT_CHECK([ovn-sbctl get Port_Binding sw0-p1 external_ids:device_id], [0], [dnl
+vm1
+])
+check ovn-nbctl --wait=sb set Logical_Router_Port lr0-sw0 \
+    external_ids:subnet=subnet1
+AT_CHECK([ovn-sbctl get Port_Binding lr0-sw0 external_ids:subnet], [0], [dnl
+subnet1
+])
+
+# external_ids of switches and routers still reach the SB Datapath_Binding.
+check ovn-nbctl --wait=sb set Logical_Switch sw0 \
+    external_ids:'"neutron:network_name"'=net1
+sw0_dp=$(fetch_column sb:Datapath_Binding _uuid external_ids:name=sw0)
+AT_CHECK([ovn-sbctl get Datapath_Binding $sw0_dp external_ids:name2], [0], [dnl
+net1
+])
+check ovn-nbctl --wait=sb set Logical_Router lr0 \
+    external_ids:'"neutron:router_name"'=router1
+lr0_dp=$(fetch_column sb:Datapath_Binding _uuid external_ids:name=lr0)
+AT_CHECK([ovn-sbctl get Datapath_Binding $lr0_dp external_ids:name2], [0], [dnl
+router1
+])
+
+AT_CLEANUP
+])
+
+# The PF9 L2-only flows are only built by the single-threaded lflow build
+# (the ovn-northd default, and what PCD deploys), which none of the
+# OVN_FOR_EACH_NORTHD* variants above cover.
+m4_foreach([NORTHD_USE_PARALLELIZATION], [no], [
+AT_SETUP([PF9 L2-only port - flows driven by LSP external_ids])
+ovn_start
+
+# A switch with a router port, a regular VIF and a VIF that qualifies as
+# L2-only apart from the external_ids:l2-port marker ("unknown" address and
+# no port security).
+check ovn-nbctl ls-add sw0
+check ovn-nbctl lr-add lr0
+check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
+check ovn-nbctl lsp-add sw0 sw0-lr0
+check ovn-nbctl lsp-set-type sw0-lr0 router
+check ovn-nbctl lsp-set-addresses sw0-lr0 router
+check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add sw0 sw0-p1
+check ovn-nbctl lsp-set-addresses sw0-p1 "00:00:00:00:00:02 10.0.0.2"
+check ovn-nbctl lsp-add sw0 sw0-l2
+check ovn-nbctl --wait=sb lsp-set-addresses sw0-l2 unknown
+
+# Flows that mention the port, and the ones among them that were not there
+# before the marker was set.
+l2_flows() {
+    ovn-sbctl dump-flows sw0 | grep 'sw0-l2' | \
+        sed 's/table=../table=??/' | sort
+}
+new_l2_flows() {
+    l2_flows > current_flows
+    comm -13 baseline_flows current_flows
+}
+
+# Without the marker the port has no L2-only flows: no flood flow in
+# ls_in_l2_lkup and no port security bypass.
+l2_flows > baseline_flows
+AT_CHECK([grep -c -E 'ls_in_l2_lkup.*priority=120|ls_out_apply_port_sec' baseline_flows], [1], [dnl
+0
+])
+
+# Only external_ids changes from here on: every step checks that northd still
+# sees Logical_Switch_Port external_ids.  The L2-only flows are built by the
+# full lflow rebuild only, hence the explicit recompute after each change.
+set_l2_extid() {
+    check ovn-nbctl --wait=sb "$@"
+}
+set_l2_extid set Logical_Switch_Port sw0-l2 external_ids:l2-port=true
+AT_CHECK([new_l2_flows], [0], [dnl
+  table=??(ls_in_apply_port_sec), priority=100  , match=(inport == "sw0-l2"), action=(next;)
+  table=??(ls_in_check_port_sec), priority=100  , match=(inport == "sw0-l2"), action=(next;)
+  table=??(ls_in_l2_lkup      ), priority=120  , match=(inport == "sw0-l2" && !eth.mcast), action=(outport = "_MC_flood_l2"; output;)
+  table=??(ls_out_apply_port_sec), priority=100  , match=(outport == "sw0-l2"), action=(output;)
+  table=??(ls_out_check_port_sec), priority=100  , match=(outport == "sw0-l2"), action=(next;)
+])
+
+# The broadcast-only ARP/ND flows for the router IP sit below the L2-only
+# flood flow: a unicast ARP from the L2-only port is flooded by priority 120
+# and a broadcast one (eth.mcast) falls through to priority 80.
+AT_CHECK([ovn-sbctl dump-flows sw0 | grep ls_in_l2_lkup | grep 'arp.tpa == 10.0.0.1' | sed 's/table=../table=??/' | sort], [0], [dnl
+  table=??(ls_in_l2_lkup      ), priority=80   , match=(flags[[1]] == 0 && eth.dst == ff:ff:ff:ff:ff:ff && arp.op == 1 && arp.tpa == 10.0.0.1), action=(clone {outport = "sw0-lr0"; output; }; outport = "_MC_flood_l2"; output;)
+])
+
+# MAC spoofing prevention keyed on external_ids:pf9-l2port-src-mac.
+set_l2_extid set Logical_Switch_Port sw0-l2 \
+    external_ids:pf9-l2port-src-mac='"00:00:00:00:00:03"'
+AT_CHECK([new_l2_flows | grep 'eth.src != '], [0], [dnl
+  table=??(ls_in_check_port_sec), priority=110  , match=(inport == "sw0-l2" && eth.src != 00:00:00:00:00:03), action=(reg0[[15]]=1; next;)
+])
+
+# ...and lifted again by external_ids:pf9-allow-mac-forged-transmits.
+set_l2_extid set Logical_Switch_Port sw0-l2 \
+    external_ids:pf9-allow-mac-forged-transmits=true
+AT_CHECK([new_l2_flows | grep -c 'eth.src != '], [1], [dnl
+0
+])
+AT_CHECK([new_l2_flows | grep -c 'priority=120 '], [0], [dnl
+1
+])
+
+# Dropping the marker removes all L2-only flows.
+set_l2_extid remove Logical_Switch_Port sw0-l2 external_ids l2-port
+AT_CHECK([new_l2_flows], [0], [])
+AT_CHECK([l2_flows | diff -u baseline_flows -])
+
+CHECK_NO_CHANGE_AFTER_RECOMPUTE
+
+AT_CLEANUP
+])

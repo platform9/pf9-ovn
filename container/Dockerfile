@@ -41,6 +41,14 @@ RUN --mount=type=bind,source=debug/u24-dbgsym,target=/tmp/dbgsym \
     done \
  && rm -rf /var/lib/apt/lists/*
 
+# Ubuntu's /usr/bin/perf is a script that runs /usr/lib/linux-tools/$(uname -r)/perf.
+# In a pod uname -r is the node's kernel, not the one linux-tools-generic was built
+# for, so that script fails. perf does not need a matching kernel, so put the
+# installed binary first on PATH. The build fails here if there is no perf.
+RUN p=; for f in /usr/lib/linux-tools/*/perf; do [ -x "$f" ] && p=$f; done \
+ && [ -n "$p" ] && ln -s "$p" /usr/local/bin/perf \
+ && perf --version
+
 # curl -O saves kubectl in the working directory (/ here) and install copies it, so
 # delete the download in the same step or the image keeps a second 62 MB copy.
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \

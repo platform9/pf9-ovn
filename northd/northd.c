@@ -1353,16 +1353,6 @@ lsp_is_type_changed(const struct sbrec_port_binding *sb,
     return true;
 }
 
-static bool
-lsp_force_fdb_lookup(const struct ovn_port *op)
-{
-    /* To enable FDB Table lookup on a logical switch port, it has to be
-     * of 'type' empty_string and "addresses" must have "unknown".
-     */
-    return !op->nbsp->type[0] && op->has_unknown &&
-        smap_get_bool(&op->nbsp->options, "force_fdb_lookup", false);
-}
-
 static struct ovn_port *
 ovn_port_get_peer(const struct hmap *lr_ports, struct ovn_port *op)
 {

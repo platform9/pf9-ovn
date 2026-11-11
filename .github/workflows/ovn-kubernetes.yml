@@ -137,6 +137,10 @@ jobs:
       run: |
         export GOPATH=$(go env GOPATH)
         echo "GOPATH=$GOPATH" >> $GITHUB_ENV
+        # setup-go@v6 exports GOTOOLCHAIN=local.  The control-plane jobs
+        # build metallb, whose go.mod needs a newer Go than the one
+        # ovn-kubernetes release-1.0 pins, so let Go fetch that toolchain.
+        echo "GOTOOLCHAIN=auto" >> $GITHUB_ENV
         echo "$GOPATH/bin" >> $GITHUB_PATH
 
     - name: Disable ufw

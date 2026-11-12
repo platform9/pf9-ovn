@@ -64,10 +64,7 @@ struct stats_node {
                                struct ofputil_flow_stats *ofp_stats);
     /* Function to process the parsed stats.
      * This function runs in main thread locked behind mutex. */
-    void (*run)(struct rconn *swconn,
-                struct ovsdb_idl_index *sbrec_port_binding_by_name,
-                struct ovs_list *stats_list,
-                uint64_t *req_delay, void *data);
+    void (*run)(struct ovs_list *stats_list, uint64_t *req_delay, void *data);
     /* Name of the stats node corresponding stopwatch. */
     const char *stopwatch_name;
 };
@@ -101,6 +98,7 @@ struct statctrl_ctx {
 
     struct seq *thread_seq;
     struct seq *main_seq;
+    uint64_t new_main_seq;
 
     struct stats_node nodes[STATS_MAX];
 };
@@ -142,6 +140,7 @@ statctrl_init(void)
     ovs_mutex_init(&mutex);
     statctrl_ctx.thread_seq = seq_create();
     statctrl_ctx.main_seq = seq_create();
+    statctrl_ctx.new_main_seq = seq_read(statctrl_ctx.main_seq);
 
     /* Definition of all stat nodes. */
     struct ofputil_flow_stats_request mac_binding_request = {
@@ -184,30 +183,37 @@ statctrl_init(void)
 void
 statctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
              struct ovsdb_idl_index *sbrec_port_binding_by_name,
+             const struct sbrec_chassis *chassis,
              struct mac_cache_data *mac_cache_data)
 {
     if (!ovnsb_idl_txn) {
         return;
     }
 
+    struct mac_binding_probe_data mac_binding_probe_data = {
+        .cache_data = mac_cache_data,
+        .sbrec_port_binding_by_name = sbrec_port_binding_by_name,
+        .swconn = statctrl_ctx.swconn,
+        .chassis = chassis,
+    };
+
     void *node_data[STATS_MAX] = {
-        mac_cache_data,
-        mac_cache_data,
-        mac_cache_data
+        [STATS_MAC_BINDING] = mac_cache_data,
+        [STATS_FDB] = mac_cache_data,
+        [STATS_MAC_BINDING_PROBE] = &mac_binding_probe_data,
     };
 
     bool schedule_updated = false;
     long long now = time_msec();
 
     ovs_mutex_lock(&mutex);
+    statctrl_ctx.new_main_seq = seq_read(statctrl_ctx.main_seq);
     for (size_t i = 0; i < STATS_MAX; i++) {
         struct stats_node *node = &statctrl_ctx.nodes[i];
         uint64_t prev_delay = node->request_delay;
 
         stopwatch_start(node->stopwatch_name, time_msec());
-        node->run(statctrl_ctx.swconn,
-                  sbrec_port_binding_by_name, &node->stats_list,
-                  &node->request_delay, node_data[i]);
+        node->run(&node->stats_list, &node->request_delay, node_data[i]);
         stopwatch_stop(node->stopwatch_name, time_msec());
 
         schedule_updated |=
@@ -242,8 +248,7 @@ statctrl_wait(struct ovsdb_idl_txn *ovnsb_idl_txn)
             poll_immediate_wake();
         }
     }
-    int64_t new_seq = seq_read(statctrl_ctx.main_seq);
-    seq_wait(statctrl_ctx.main_seq, new_seq);
+    seq_wait(statctrl_ctx.main_seq, statctrl_ctx.new_main_seq);
     ovs_mutex_unlock(&mutex);
 }
 

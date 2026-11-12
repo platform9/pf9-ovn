@@ -39,6 +39,7 @@
 #define VXLAN_TUNNEL_OVERHEAD 30
 
 struct eth_addr;
+struct nbrec_logical_router;
 struct nbrec_logical_router_port;
 struct ovsrec_flow_sample_collector_set_table;
 struct sbrec_datapath_binding;
@@ -98,6 +99,7 @@ ipv6_is_all_site_router(const struct in6_addr *addr)
     return ipv6_addr_equals(addr, &in6addr_all_site_routers);
 }
 
+bool lrouter_is_enabled(const struct nbrec_logical_router *);
 bool is_dynamic_lsp_address(const char *address);
 bool extract_addresses(const char *address, struct lport_addresses *,
                        int *ofs);
@@ -145,7 +147,8 @@ enum ovn_pipeline {
 uint32_t sbrec_logical_flow_hash(const struct sbrec_logical_flow *);
 uint32_t ovn_logical_flow_hash(uint8_t table_id, enum ovn_pipeline pipeline,
                                uint16_t priority,
-                               const char *match, const char *actions);
+                               const char *match, const char *actions,
+                               bool acl_ct_translation);
 void ovn_conn_show(struct unixctl_conn *conn, int argc OVS_UNUSED,
                    const char *argv[] OVS_UNUSED, void *idl_);
 
@@ -467,6 +470,24 @@ void sorted_array_apply_diff(const struct sorted_array *a1,
                                                     const char *item,
                                                     bool add),
                              const void *arg);
+
+static inline struct eth_addr
+eth_addr_create_mask(unsigned int len)
+{
+    struct eth_addr mac;
+    eth_addr_from_uint64((UINT64_MAX << (48 - len)), &mac);
+
+    return mac;
+}
+
+static inline unsigned int
+eth_addr_get_prefix_len(struct eth_addr mac)
+{
+    uint64_t n = (UINT64_C(0xffff) << 48) | eth_addr_to_uint64(mac);
+    return 48 - ctz64(n);
+}
+
+bool eth_addr_parse_masked(const char *, struct eth_addr *, unsigned int *);
 
 /* Utilities around properly handling exit command. */
 struct ovn_exit_args {

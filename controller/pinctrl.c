@@ -159,6 +159,7 @@ VLOG_DEFINE_THIS_MODULE(pinctrl);
 static struct ovs_mutex pinctrl_mutex = OVS_MUTEX_INITIALIZER;
 static struct seq *pinctrl_handler_seq;
 static struct seq *pinctrl_main_seq;
+static uint64_t main_seq;
 
 #define GARP_RARP_DEF_MAX_TIMEOUT    16000
 static long long int garp_rarp_max_timeout = GARP_RARP_DEF_MAX_TIMEOUT;
@@ -202,7 +203,7 @@ static void run_put_mac_bindings(
     struct ovsdb_idl_index *sbrec_port_binding_by_key,
     struct ovsdb_idl_index *sbrec_mac_binding_by_lport_ip)
     OVS_REQUIRES(pinctrl_mutex);
-static void wait_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn);
+static void wait_put_mac_bindings(void);
 static void send_mac_binding_buffered_pkts(struct rconn *swconn)
     OVS_REQUIRES(pinctrl_mutex);
 
@@ -232,7 +233,8 @@ static void send_garp_rarp_prepare(
     const struct ovsrec_bridge *,
     const struct sbrec_chassis *,
     const struct hmap *local_datapaths,
-    const struct ovsrec_open_vswitch_table *ovs_table)
+    const struct ovsrec_open_vswitch_table *ovs_table,
+    struct if_status_mgr *mgr)
     OVS_REQUIRES(pinctrl_mutex);
 static void send_garp_rarp_run(struct rconn *swconn,
                                long long int *send_garp_rarp_time)
@@ -263,7 +265,7 @@ static void pinctrl_handle_put_icmp_frag_mtu(struct rconn *swconn,
 static void
 pinctrl_handle_event(struct ofpbuf *userdata)
     OVS_REQUIRES(pinctrl_mutex);
-static void wait_controller_event(struct ovsdb_idl_txn *ovnsb_idl_txn);
+static void wait_controller_event(void);
 static void init_ipv6_ras(void);
 static void destroy_ipv6_ras(void);
 static void ipv6_ra_wait(long long int send_ipv6_ra_time);
@@ -310,7 +312,7 @@ static void run_put_vport_bindings(
     struct ovsdb_idl_index *sbrec_port_binding_by_key,
     const struct sbrec_chassis *chassis, int64_t cur_cfg)
     OVS_REQUIRES(pinctrl_mutex);
-static void wait_put_vport_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn);
+static void wait_put_vport_bindings(void);
 static void pinctrl_handle_bind_vport(const struct flow *md,
                                       struct ofpbuf *userdata);
 static void pinctrl_handle_svc_check(struct rconn *swconn,
@@ -375,14 +377,15 @@ static void run_put_fdb(struct ovsdb_idl_txn *ovnsb_idl_txn,
                         struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac,
             struct ovsdb_idl_index *sbrec_port_binding_by_key,
             struct ovsdb_idl_index *sbrec_datapath_binding_by_key,
-                        const struct fdb *fdb)
+                        struct fdb *fdb, uint64_t cur_cfg)
                         OVS_REQUIRES(pinctrl_mutex);
 static void run_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn,
             struct ovsdb_idl_index *sbrec_port_binding_by_key,
             struct ovsdb_idl_index *sbrec_datapath_binding_by_key,
-                        struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac)
+                        struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac,
+                        uint64_t cur_cfg)
                         OVS_REQUIRES(pinctrl_mutex);
-static void wait_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn);
+static void wait_put_fdbs(void);
 static void pinctrl_handle_put_fdb(const struct flow *md,
                                    const struct flow *headers)
                                    OVS_REQUIRES(pinctrl_mutex);
@@ -394,6 +397,7 @@ COVERAGE_DEFINE(pinctrl_drop_buffered_packets_map);
 COVERAGE_DEFINE(pinctrl_drop_controller_event);
 COVERAGE_DEFINE(pinctrl_drop_put_vport_binding);
 COVERAGE_DEFINE(pinctrl_notify_main_thread);
+COVERAGE_DEFINE(pinctrl_notify_handler_thread);
 COVERAGE_DEFINE(pinctrl_total_pin_pkts);
 
 struct empty_lb_backends_event {
@@ -562,6 +566,7 @@ pinctrl_init(void)
     pinctrl.mac_binding_can_timestamp = false;
     pinctrl_handler_seq = seq_create();
     pinctrl_main_seq = seq_create();
+    main_seq = seq_read(pinctrl_main_seq);
 
     latch_init(&pinctrl.pinctrl_thread_exit);
     pinctrl.pinctrl_thread = ovs_thread_create("ovn_pinctrl", pinctrl_handler,
@@ -751,32 +756,100 @@ pinctrl_find_prefixd_state(const struct flow *ip_flow, unsigned aid)
     return NULL;
 }
 
+static const struct dhcpv6_opt_header *
+next_dhcpv6_opt(const uint8_t *data, size_t opts_len,
+                size_t *len, size_t *opt_len)
+{
+    size_t len_inner = *len + sizeof(struct dhcpv6_opt_header);
+    if (len_inner > opts_len) {
+        return NULL;
+    }
+
+    const struct dhcpv6_opt_header *hdr =
+        (const struct dhcpv6_opt_header *) (data + *len);
+    len_inner += ntohs(hdr->len);
+    if (len_inner > opts_len) {
+        return NULL;
+    }
+
+    *len = len_inner;
+    *opt_len = sizeof *hdr + ntohs(hdr->len);
+    return hdr;
+}
+
+static void
+dhcpv6_opt_ia_na_parse_inner(const struct dhcpv6_opt_ia_na *ia_na,
+                             size_t opts_len,
+                             struct dhcpv6_opt_ia_prefix **ia_prefix,
+                             struct dhcpv6_opt_status **status)
+{
+    /* Check if there are at least some data. */
+    opts_len -= sizeof *ia_na;
+    if (!opts_len) {
+        return;
+    }
+
+    const uint8_t *opts_data = (uint8_t *) ia_na + sizeof *ia_na;
+    size_t len = 0, opt_len = 0;
+
+    const struct dhcpv6_opt_header *in_opt;
+    for (in_opt = next_dhcpv6_opt(opts_data, opts_len, &len, &opt_len);
+         in_opt;
+         in_opt = next_dhcpv6_opt(opts_data, opts_len,
+                                  &len, &opt_len)) {
+        switch (ntohs(in_opt->code)) {
+        case DHCPV6_OPT_IA_PREFIX: {
+            /* Consider only the first found option. */
+            if (*ia_prefix) {
+                break;
+            }
+
+            if (opt_len < sizeof(struct dhcpv6_opt_ia_prefix)) {
+                break;
+            }
+
+            *ia_prefix = (struct dhcpv6_opt_ia_prefix *) in_opt;
+            break;
+        }
+        case DHCPV6_OPT_STATUS_CODE: {
+            /* Consider only the first found option. */
+            if (*status) {
+                break;
+            }
+
+            if (opt_len < sizeof(struct dhcpv6_opt_status)) {
+                break;
+            }
+
+            *status = (struct dhcpv6_opt_status *) in_opt;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+}
+
 static void
 pinctrl_parse_dhcpv6_advt(struct rconn *swconn, const struct flow *ip_flow,
-                          struct dp_packet *pkt_in, const struct match *md)
+                          const void *opts_data, size_t opts_len,
+                          const struct match *md)
 {
-    struct udp_header *udp_in = dp_packet_l4(pkt_in);
-    size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
-    unsigned char *in_dhcpv6_data = (unsigned char *)(udp_in + 1);
-    uint8_t *data, *end = (uint8_t *)udp_in + dlen;
-    int len = 0, aid = 0;
+    size_t len = 0, opt_len = 0, data_len = 0;
+    int aid = 0;
 
-    data = xmalloc(dlen);
-    /* skip DHCPv6 common header */
-    in_dhcpv6_data += 4;
-    while (in_dhcpv6_data < end) {
-        struct dhcpv6_opt_header *in_opt =
-             (struct dhcpv6_opt_header *)in_dhcpv6_data;
-        int opt_len = sizeof *in_opt + ntohs(in_opt->len);
+    uint8_t *data = xmalloc(opts_len);
 
-        if (dlen < opt_len + len) {
-            goto out;
-        }
-
+    const struct dhcpv6_opt_header *in_opt;
+    for (in_opt = next_dhcpv6_opt(opts_data, opts_len, &len, &opt_len);
+         in_opt;
+         in_opt = next_dhcpv6_opt(opts_data, opts_len, &len, &opt_len)) {
         switch (ntohs(in_opt->code)) {
         case DHCPV6_OPT_IA_PD: {
+            if (opt_len < sizeof(struct dhcpv6_opt_ia_na)) {
+                break;
+            }
             struct dhcpv6_opt_ia_na *ia_na = (struct dhcpv6_opt_ia_na *)in_opt;
-            int orig_len = len, hdr_len = 0, size = sizeof *in_opt + 12;
             uint32_t t1 = ntohl(ia_na->t1), t2 = ntohl(ia_na->t2);
 
             if (t1 > t2 && t2 > 0) {
@@ -784,55 +857,49 @@ pinctrl_parse_dhcpv6_advt(struct rconn *swconn, const struct flow *ip_flow,
             }
 
             aid = ntohl(ia_na->iaid);
-            memcpy(&data[len], in_opt, size);
-            in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
-            len += size;
 
-            while (size < opt_len) {
-                int flen = sizeof *in_opt + ntohs(in_opt->len);
+            memcpy(data + data_len, in_opt, sizeof *ia_na);
+            size_t ia_na_offset = data_len;
+            data_len += sizeof *ia_na;
 
-                if (dlen < flen + len) {
+            struct dhcpv6_opt_ia_prefix *ia_prefix = NULL;
+            struct dhcpv6_opt_status *status = NULL;
+            dhcpv6_opt_ia_na_parse_inner(ia_na, opt_len, &ia_prefix, &status);
+
+            if (ia_prefix) {
+                uint32_t plife_time = ntohl(ia_prefix->plife_time);
+                uint32_t vlife_time = ntohl(ia_prefix->vlife_time);
+
+                if (plife_time > vlife_time) {
                     goto out;
                 }
 
-                if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
-                    struct dhcpv6_opt_ia_prefix *ia_hdr =
-                        (struct dhcpv6_opt_ia_prefix *)in_opt;
-                    uint32_t plife_time = ntohl(ia_hdr->plife_time);
-                    uint32_t vlife_time = ntohl(ia_hdr->vlife_time);
-
-                    if (plife_time > vlife_time) {
-                        goto out;
-                    }
-
-                    memcpy(&data[len], in_opt, flen);
-                    hdr_len += flen;
-                    len += flen;
-                }
-                if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
-                   struct dhcpv6_opt_status *status;
-
-                   status = (struct dhcpv6_opt_status *)in_opt;
-                   if (ntohs(status->status_code)) {
-                       goto out;
-                   }
-                }
-                size += flen;
-                in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
+                memcpy(data + data_len, ia_prefix, sizeof *ia_prefix);
+                data_len += sizeof *ia_prefix;
             }
-            in_opt = (struct dhcpv6_opt_header *)&data[orig_len];
-            in_opt->len = htons(hdr_len + 12);
+
+            if (status) {
+                if (ntohs(status->status_code)) {
+                    goto out;
+                }
+            }
+
+            /* Adjust the copied IA NA option header len. */
+            struct dhcpv6_opt_header *copied_hdr =
+                (struct dhcpv6_opt_header *) (data + ia_na_offset);
+            copied_hdr->len = htons(sizeof *ia_na - sizeof *copied_hdr +
+                                    (ia_prefix ? sizeof *ia_prefix : 0));
+
             break;
         }
         case DHCPV6_OPT_SERVER_ID_CODE:
         case DHCPV6_OPT_CLIENT_ID_CODE:
-            memcpy(&data[len], in_opt, opt_len);
-            len += opt_len;
+            memcpy(data + data_len, in_opt, opt_len);
+            data_len += opt_len;
             break;
         default:
             break;
         }
-        in_dhcpv6_data += opt_len;
     }
 
     struct ipv6_prefixd_state *pfd = pinctrl_find_prefixd_state(ip_flow, aid);
@@ -860,14 +927,14 @@ pinctrl_parse_dhcpv6_advt(struct rconn *swconn, const struct flow *ip_flow,
                                             &ip_flow->ipv6_dst,
                                             &in6addr_all_dhcp_agents,
                                             0, 0, 255,
-                                            len + UDP_HEADER_LEN + 4);
-    udp_h->udp_len = htons(len + UDP_HEADER_LEN + 4);
+                                            data_len + UDP_HEADER_LEN + 4);
+    udp_h->udp_len = htons(data_len + UDP_HEADER_LEN + 4);
     udp_h->udp_csum = 0;
     packet_set_udp_port(&packet, htons(546), htons(547));
 
     unsigned char *dhcp_hdr = (unsigned char *)(udp_h + 1);
     *dhcp_hdr = DHCPV6_MSG_TYPE_REQUEST;
-    memcpy(dhcp_hdr + 4, data, len);
+    memcpy(dhcp_hdr + 4, data, data_len);
 
     uint32_t csum = packet_csum_pseudoheader6(dp_packet_l3(&packet));
     csum = csum_continue(csum, udp_h, dp_packet_size(&packet) -
@@ -935,39 +1002,29 @@ pinctrl_prefixd_state_handler(const struct flow *ip_flow,
 }
 
 static void
-pinctrl_parse_dhcpv6_reply(struct dp_packet *pkt_in,
+pinctrl_parse_dhcpv6_reply(const void *opts_data, size_t opts_len,
                            const struct flow *ip_flow)
     OVS_REQUIRES(pinctrl_mutex)
 {
-    struct udp_header *udp_in = dp_packet_l4(pkt_in);
-    unsigned char *in_dhcpv6_data = (unsigned char *)(udp_in + 1);
-    size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
     unsigned t1 = 0, t2 = 0, vlife_time = 0, plife_time = 0;
-    uint8_t *end = (uint8_t *) udp_in + dlen;
     uint8_t prefix_len = 0, uuid_len = 0;
     uint8_t uuid[DHCPV6_MAX_DUID_LEN];
     struct in6_addr ipv6 = in6addr_any;
+    size_t len = 0, opt_len = 0;
     bool status = false;
     unsigned aid = 0;
 
-    /* skip DHCPv6 common header */
-    in_dhcpv6_data += 4;
-
-    while (in_dhcpv6_data < end) {
-        struct dhcpv6_opt_header *in_opt =
-             (struct dhcpv6_opt_header *)in_dhcpv6_data;
-        int opt_len = sizeof *in_opt + ntohs(in_opt->len);
-
-        if (in_dhcpv6_data + opt_len > end) {
-            break;
-        }
-
+    const struct dhcpv6_opt_header *in_opt;
+    for (in_opt = next_dhcpv6_opt(opts_data, opts_len, &len, &opt_len);
+         in_opt;
+         in_opt = next_dhcpv6_opt(opts_data, opts_len, &len, &opt_len)) {
         switch (ntohs(in_opt->code)) {
         case DHCPV6_OPT_IA_PD: {
-            int size = sizeof *in_opt + 12;
-            in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
+            if (opt_len < sizeof(struct dhcpv6_opt_ia_na)) {
+                break;
+            }
             struct dhcpv6_opt_ia_na *ia_na =
-                (struct dhcpv6_opt_ia_na *)in_dhcpv6_data;
+                (struct dhcpv6_opt_ia_na *) in_opt;
 
             aid = ntohl(ia_na->iaid);
             t1 = ntohl(ia_na->t1);
@@ -976,30 +1033,25 @@ pinctrl_parse_dhcpv6_reply(struct dp_packet *pkt_in,
                 break;
             }
 
-            while (size < opt_len) {
-                if (ntohs(in_opt->code) == DHCPV6_OPT_IA_PREFIX) {
-                    struct dhcpv6_opt_ia_prefix *ia_hdr =
-                        (struct dhcpv6_opt_ia_prefix *)(in_dhcpv6_data + size);
+            struct dhcpv6_opt_ia_prefix *ia_hdr = NULL;
+            struct dhcpv6_opt_status *status_hdr = NULL;
+            dhcpv6_opt_ia_na_parse_inner(ia_na, opt_len, &ia_hdr, &status_hdr);
 
-                    plife_time = ntohl(ia_hdr->plife_time);
-                    vlife_time = ntohl(ia_hdr->vlife_time);
-                    if (plife_time > vlife_time) {
-                        break;
-                    }
-                    prefix_len = ia_hdr->plen;
-                    memcpy(&ipv6, &ia_hdr->ipv6, sizeof (struct in6_addr));
-                    status = true;
+            if (ia_hdr) {
+                plife_time = ntohl(ia_hdr->plife_time);
+                vlife_time = ntohl(ia_hdr->vlife_time);
+                if (plife_time > vlife_time) {
+                    break;
                 }
-                if (ntohs(in_opt->code) == DHCPV6_OPT_STATUS_CODE) {
-                   struct dhcpv6_opt_status *status_hdr;
+                prefix_len = ia_hdr->plen;
+                memcpy(&ipv6, &ia_hdr->ipv6, sizeof (struct in6_addr));
+                status = true;
+            }
 
-                   status_hdr = (struct dhcpv6_opt_status *)in_opt;
-                   if (ntohs(status_hdr->status_code)) {
-                       status = false;
-                   }
+            if (status_hdr) {
+                if (ntohs(status_hdr->status_code)) {
+                    status = false;
                 }
-                size += sizeof *in_opt + ntohs(in_opt->len);
-                in_opt = (struct dhcpv6_opt_header *)(in_dhcpv6_data + size);
             }
             break;
         }
@@ -1010,7 +1062,6 @@ pinctrl_parse_dhcpv6_reply(struct dp_packet *pkt_in,
         default:
             break;
         }
-        in_dhcpv6_data += opt_len;
     }
     if (status) {
         char prefix[INET6_ADDRSTRLEN + 1];
@@ -1037,14 +1088,20 @@ pinctrl_handle_dhcp6_server(struct rconn *swconn, const struct flow *ip_flow,
     }
 
     struct udp_header *udp_in = dp_packet_l4(pkt_in);
-    unsigned char *dhcp_hdr = (unsigned char *)(udp_in + 1);
+    size_t dlen = MIN(ntohs(udp_in->udp_len), dp_packet_l4_size(pkt_in));
+    if (dlen < UDP_HEADER_LEN + DHCPV6_HEADER_LEN) {
+        return;
+    }
 
-    switch (*dhcp_hdr) {
+    size_t opts_len = dlen - UDP_HEADER_LEN - DHCPV6_HEADER_LEN;
+    const struct dhcpv6_header *hdr = dp_packet_get_udp_payload(pkt_in);
+    switch (hdr->msg_type) {
     case DHCPV6_MSG_TYPE_ADVT:
-        pinctrl_parse_dhcpv6_advt(swconn, ip_flow, pkt_in, md);
+        pinctrl_parse_dhcpv6_advt(swconn, ip_flow, DHCPV6_PAYLOAD(hdr),
+                                  opts_len, md);
         break;
     case DHCPV6_MSG_TYPE_REPLY:
-        pinctrl_parse_dhcpv6_reply(pkt_in, ip_flow);
+        pinctrl_parse_dhcpv6_reply(DHCPV6_PAYLOAD(hdr), opts_len, ip_flow);
         break;
     default:
         break;
@@ -1577,7 +1634,8 @@ pinctrl_handle_icmp(struct rconn *swconn, const struct flow *ip_flow,
 
     if (get_dl_type(ip_flow) == htons(ETH_TYPE_IP)) {
         struct ip_header *in_ip = dp_packet_l3(pkt_in);
-        uint16_t in_ip_len = ntohs(in_ip->ip_tot_len);
+        uint16_t in_ip_len =
+            MIN(ntohs(in_ip->ip_tot_len), dp_packet_l3_size(pkt_in));
         if (in_ip_len < IP_HEADER_LEN) {
             static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
             VLOG_WARN_RL(&rl,
@@ -1630,7 +1688,9 @@ pinctrl_handle_icmp(struct rconn *swconn, const struct flow *ip_flow,
         ih->icmp_csum = csum(ih, sizeof *ih + in_ip_len);
     } else {
         struct ovs_16aligned_ip6_hdr *in_ip = dp_packet_l3(pkt_in);
-        uint16_t in_ip_len = (uint16_t) sizeof *in_ip + ntohs(in_ip->ip6_plen);
+        uint16_t pkt_in_ip_len =
+            (uint16_t) sizeof *in_ip + ntohs(in_ip->ip6_plen);
+        uint16_t in_ip_len = MIN(pkt_in_ip_len, dp_packet_l3_size(pkt_in));
 
         const struct in6_addr *ip6_src =
             loopback ? &ip_flow->ipv6_dst : &ip_flow->ipv6_src;
@@ -2311,7 +2371,7 @@ exit:
 }
 
 static void
-encode_dhcpv6_server_id_opt(struct ofpbuf *opts, struct eth_addr *mac)
+encode_dhcpv6_server_id_opt(struct ofpbuf *opts, void *user_data)
 {
     /* The Server Identifier option carries a DUID
      * identifying a server between a client and a server.
@@ -2319,15 +2379,15 @@ encode_dhcpv6_server_id_opt(struct ofpbuf *opts, struct eth_addr *mac)
      *
      * We use DUID Based on Link-layer Address [DUID-LL].
      */
-    struct dhcpv6_opt_server_id *server_id =
-            ofpbuf_put_zeros(opts, sizeof *server_id);
-    *server_id = (struct dhcpv6_opt_server_id) {
-            .opt.code = htons(DHCPV6_OPT_SERVER_ID_CODE),
-            .opt.len = htons(DHCP6_OPT_SERVER_ID_LEN - DHCP6_OPT_HEADER_LEN),
-            .duid_type = htons(DHCPV6_DUID_LL),
-            .hw_type = htons(DHCPV6_HW_TYPE_ETH),
-            .mac = *mac
+    struct dhcpv6_opt_server_id server_id = {
+        .opt.code = htons(DHCPV6_OPT_SERVER_ID_CODE),
+        .opt.len = htons(DHCP6_OPT_SERVER_ID_LEN - DHCP6_OPT_HEADER_LEN),
+        .duid_type = htons(DHCPV6_DUID_LL),
+        .hw_type = htons(DHCPV6_HW_TYPE_ETH),
     };
+    memcpy(&server_id.mac, user_data, sizeof server_id.mac);
+
+    ofpbuf_put(opts, &server_id, sizeof server_id);
 }
 
 static bool
@@ -2498,6 +2558,8 @@ compose_dhcpv6_status(struct ofpbuf *userdata, struct ofpbuf *opts)
     return true;
 }
 
+#define DHCPV6_UC_PXE_OFFSET 2
+
 /* Called with in the pinctrl_handler thread context. */
 static void
 pinctrl_handle_put_dhcpv6_opts(
@@ -2540,16 +2602,17 @@ pinctrl_handle_put_dhcpv6_opts(
     }
 
     struct udp_header *in_udp = dp_packet_l4(pkt_in);
-    const uint8_t *in_dhcpv6_data = dp_packet_get_udp_payload(pkt_in);
-    if (!in_udp || !in_dhcpv6_data) {
+    size_t dlen = MIN(ntohs(in_udp->udp_len), dp_packet_l4_size(pkt_in));
+    if (dlen < UDP_HEADER_LEN + DHCPV6_HEADER_LEN) {
         VLOG_WARN_RL(&rl, "truncated dhcpv6 packet");
         goto exit;
     }
 
+    const struct dhcpv6_header *hdr = dp_packet_get_udp_payload(pkt_in);
+
     uint8_t out_dhcpv6_msg_type;
-    uint8_t in_dhcpv6_msg_type = *in_dhcpv6_data;
     bool status_only = false;
-    switch (in_dhcpv6_msg_type) {
+    switch (hdr->msg_type) {
     case DHCPV6_MSG_TYPE_SOLICIT:
         out_dhcpv6_msg_type = DHCPV6_MSG_TYPE_ADVT;
         break;
@@ -2570,8 +2633,6 @@ pinctrl_handle_put_dhcpv6_opts(
         /* Invalid or unsupported DHCPv6 message type */
         goto exit;
     }
-    /* Skip 4 bytes (message type (1 byte) + transaction ID (3 bytes). */
-    in_dhcpv6_data += 4;
     /* We need to extract IAID from the IA-NA option of the client's DHCPv6
      * solicit/request/confirm packet and copy the same IAID in the Server's
      * response.
@@ -2580,17 +2641,24 @@ pinctrl_handle_put_dhcpv6_opts(
      * */
     ovs_be32 iaid = 0;
     struct dhcpv6_opt_header const *in_opt_client_id = NULL;
-    size_t udp_len = ntohs(in_udp->udp_len);
-    size_t l4_len = dp_packet_l4_size(pkt_in);
-    uint8_t *end = (uint8_t *)in_udp + MIN(udp_len, l4_len);
     bool ipxe_req = false;
     uint8_t fqdn_flags = DHCPV6_FQDN_FLAGS_UNDEFINED;
-    while (in_dhcpv6_data < end) {
-        struct dhcpv6_opt_header const *in_opt =
-             (struct dhcpv6_opt_header *)in_dhcpv6_data;
-        switch(ntohs(in_opt->code)) {
+    size_t len = 0, opt_len = 0;
+    size_t opts_len = dlen - UDP_HEADER_LEN - DHCPV6_HEADER_LEN;
+
+    const struct dhcpv6_opt_header *in_opt;
+    for (in_opt = next_dhcpv6_opt(DHCPV6_PAYLOAD(hdr), opts_len,
+                                  &len, &opt_len);
+         in_opt;
+         in_opt = next_dhcpv6_opt(DHCPV6_PAYLOAD(hdr), opts_len,
+                                  &len, &opt_len)) {
+        switch (ntohs(in_opt->code)) {
         case DHCPV6_OPT_IA_NA_CODE:
         {
+            if (opt_len < sizeof(struct dhcpv6_opt_ia_na)) {
+                break;
+            }
+
             struct dhcpv6_opt_ia_na *opt_ia_na = (
                 struct dhcpv6_opt_ia_na *)in_opt;
             iaid = opt_ia_na->iaid;
@@ -2602,21 +2670,30 @@ pinctrl_handle_put_dhcpv6_opts(
             break;
 
         case DHCPV6_OPT_USER_CLASS: {
-            char *user_class = (char *)(in_opt + 1);
-            if (!strcmp(user_class + 2, "iPXE")) {
+            if (opt_len <
+                sizeof(struct dhcpv6_opt_header) + DHCPV6_UC_PXE_OFFSET + 4) {
+                break;
+            }
+
+            const char *user_class = DHCPV6_OPT_PAYLOAD(in_opt);
+            if (!strncmp(user_class + DHCPV6_UC_PXE_OFFSET, "iPXE", 4)) {
                 ipxe_req = true;
             }
             break;
         }
 
         case DHCPV6_OPT_FQDN_CODE:
-            fqdn_flags = *(in_dhcpv6_data + sizeof *in_opt);
+            if (opt_len <
+                sizeof(struct dhcpv6_opt_header) + sizeof(uint8_t)) {
+                break;
+            }
+
+            fqdn_flags = *(uint8_t *) DHCPV6_OPT_PAYLOAD(in_opt);
             break;
 
         default:
             break;
         }
-        in_dhcpv6_data += sizeof *in_opt + ntohs(in_opt->len);
     }
 
     if (!in_opt_client_id) {
@@ -2625,7 +2702,7 @@ pinctrl_handle_put_dhcpv6_opts(
         goto exit;
     }
 
-    if (!iaid && in_dhcpv6_msg_type != DHCPV6_MSG_TYPE_INFO_REQ) {
+    if (!iaid && hdr->msg_type != DHCPV6_MSG_TYPE_INFO_REQ) {
         VLOG_WARN_RL(&rl, "DHCPv6 option - IA NA not present in the "
                      "DHCPv6 packet");
         goto exit;
@@ -3224,10 +3301,16 @@ process_packet_in(struct rconn *swconn, const struct ofp_header *msg)
         ovs_mutex_unlock(&pinctrl_mutex);
         break;
 
-    case ACTION_OPCODE_MG_SPLIT_BUF:
+    /* Deprecated actions. */
+    case ACTION_OPCODE_MG_SPLIT_BUF: {
+        char *opc_str = ovnact_op_to_string(ntohl(ah->opcode));
+        VLOG_WARN_RL(&rl, "pinctrl received deprecated packet-in | opcode=%s",
+                     opc_str);
+        free(opc_str);
         pinctrl_mg_split_buff_handler(swconn, &packet, &pin.flow_metadata,
                                       &userdata);
         break;
+    }
 
     default:
         VLOG_WARN_RL(&rl, "unrecognized packet-in opcode %"PRIu32,
@@ -3302,6 +3385,7 @@ pinctrl_recv(struct rconn *swconn, const struct ofp_header *oh,
 static void
 notify_pinctrl_handler(void)
 {
+    COVERAGE_INC(pinctrl_notify_handler_thread);
     seq_change(pinctrl_handler_seq);
 }
 
@@ -3358,11 +3442,15 @@ pinctrl_handler(void *arg_)
         ovsrcu_quiesce_end();
 
         long long int bfd_time = LLONG_MAX;
+        bool lock_failed = false;
 
-        ovs_mutex_lock(&pinctrl_mutex);
-        pinctrl_rconn_setup(swconn, pctrl->br_int_name);
-        ip_mcast_snoop_run();
-        ovs_mutex_unlock(&pinctrl_mutex);
+        if (!ovs_mutex_trylock(&pinctrl_mutex)) {
+            pinctrl_rconn_setup(swconn, pctrl->br_int_name);
+            ip_mcast_snoop_run();
+            ovs_mutex_unlock(&pinctrl_mutex);
+        } else {
+            lock_failed = true;
+        }
 
         rconn_run(swconn);
         new_seq = seq_read(pinctrl_handler_seq);
@@ -3387,35 +3475,46 @@ pinctrl_handler(void *arg_)
             }
 
             if (may_inject_pkts()) {
-                ovs_mutex_lock(&pinctrl_mutex);
-                send_garp_rarp_run(swconn, &send_garp_rarp_time);
-                send_ipv6_ras(swconn, &send_ipv6_ra_time);
-                send_ipv6_prefixd(swconn, &send_prefixd_time);
-                send_mac_binding_buffered_pkts(swconn);
-                bfd_monitor_send_msg(swconn, &bfd_time);
-                ovs_mutex_unlock(&pinctrl_mutex);
-
+                if (!ovs_mutex_trylock(&pinctrl_mutex)) {
+                    send_garp_rarp_run(swconn, &send_garp_rarp_time);
+                    send_ipv6_ras(swconn, &send_ipv6_ra_time);
+                    send_ipv6_prefixd(swconn, &send_prefixd_time);
+                    send_mac_binding_buffered_pkts(swconn);
+                    bfd_monitor_send_msg(swconn, &bfd_time);
+                    ovs_mutex_unlock(&pinctrl_mutex);
+                } else {
+                    lock_failed = true;
+                }
                 ip_mcast_querier_run(swconn, &send_mcast_query_time);
             }
 
-            ovs_mutex_lock(&pinctrl_mutex);
-            svc_monitors_run(swconn, &svc_monitors_next_run_time);
-            ovs_mutex_unlock(&pinctrl_mutex);
+            if (!ovs_mutex_trylock(&pinctrl_mutex)) {
+                svc_monitors_run(swconn, &svc_monitors_next_run_time);
+                ovs_mutex_unlock(&pinctrl_mutex);
+            } else {
+                lock_failed = true;
+            }
         }
 
-        rconn_run_wait(swconn);
-        rconn_recv_wait(swconn);
-        if (rconn_is_connected(swconn)) {
-            send_garp_rarp_wait(send_garp_rarp_time);
-            ipv6_ra_wait(send_ipv6_ra_time);
-            ip_mcast_querier_wait(send_mcast_query_time);
-            svc_monitors_wait(svc_monitors_next_run_time);
-            ipv6_prefixd_wait(send_prefixd_time);
-            bfd_monitor_wait(bfd_time);
-        }
-        seq_wait(pinctrl_handler_seq, new_seq);
+        if (lock_failed) {
+            /* Wait for 5 msecs before waking to avoid degrading the
+             * lock to a spinlock. */
+            poll_timer_wait(5);
+        } else {
+            rconn_run_wait(swconn);
+            rconn_recv_wait(swconn);
+            if (rconn_is_connected(swconn)) {
+                send_garp_rarp_wait(send_garp_rarp_time);
+                ipv6_ra_wait(send_ipv6_ra_time);
+                ip_mcast_querier_wait(send_mcast_query_time);
+                svc_monitors_wait(svc_monitors_next_run_time);
+                ipv6_prefixd_wait(send_prefixd_time);
+                bfd_monitor_wait(bfd_time);
+            }
+            seq_wait(pinctrl_handler_seq, new_seq);
 
-        latch_wait(&pctrl->pinctrl_thread_exit);
+            latch_wait(&pctrl->pinctrl_thread_exit);
+        }
 
         ovsrcu_quiesce_start();
         poll_block();
@@ -3504,9 +3603,13 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
             const struct shash *local_active_ports_ipv6_pd,
             const struct shash *local_active_ports_ras,
             const struct ovsrec_open_vswitch_table *ovs_table,
-            int64_t cur_cfg)
+            int64_t cur_cfg,
+            struct if_status_mgr *mgr)
 {
     ovs_mutex_lock(&pinctrl_mutex);
+
+    main_seq = seq_read(pinctrl_main_seq);
+
     run_put_mac_bindings(ovnsb_idl_txn, sbrec_datapath_binding_by_key,
                          sbrec_port_binding_by_key,
                          sbrec_mac_binding_by_lport_ip);
@@ -3515,7 +3618,7 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
     send_garp_rarp_prepare(ovnsb_idl_txn, sbrec_port_binding_by_datapath,
                            sbrec_port_binding_by_name,
                            sbrec_mac_binding_by_lport_ip, br_int, chassis,
-                           local_datapaths, ovs_table);
+                           local_datapaths, ovs_table, mgr);
     prepare_ipv6_ras(local_active_ports_ras, sbrec_port_binding_by_name);
     prepare_ipv6_prefixd(ovnsb_idl_txn, sbrec_port_binding_by_name,
                          local_active_ports_ipv6_pd, chassis,
@@ -3536,7 +3639,8 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
     bfd_monitor_run(ovnsb_idl_txn, bfd_table, sbrec_port_binding_by_name,
                     chassis, active_tunnels);
     run_put_fdbs(ovnsb_idl_txn, sbrec_port_binding_by_key,
-                 sbrec_datapath_binding_by_key, sbrec_fdb_by_dp_key_mac);
+                 sbrec_datapath_binding_by_key, sbrec_fdb_by_dp_key_mac,
+                 cur_cfg);
     run_activated_ports(ovnsb_idl_txn, sbrec_datapath_binding_by_key,
                         sbrec_port_binding_by_key, chassis);
     ovs_mutex_unlock(&pinctrl_mutex);
@@ -4044,12 +4148,13 @@ void
 pinctrl_wait(struct ovsdb_idl_txn *ovnsb_idl_txn)
 {
     ovs_mutex_lock(&pinctrl_mutex);
-    wait_put_mac_bindings(ovnsb_idl_txn);
-    wait_controller_event(ovnsb_idl_txn);
-    wait_put_vport_bindings(ovnsb_idl_txn);
-    int64_t new_seq = seq_read(pinctrl_main_seq);
-    seq_wait(pinctrl_main_seq, new_seq);
-    wait_put_fdbs(ovnsb_idl_txn);
+    if (ovnsb_idl_txn) {
+        wait_put_mac_bindings();
+        wait_controller_event();
+        wait_put_vport_bindings();
+        wait_put_fdbs();
+        seq_wait(pinctrl_main_seq, main_seq);
+    }
     wait_activated_ports();
     ovs_mutex_unlock(&pinctrl_mutex);
 }
@@ -4115,6 +4220,7 @@ init_put_mac_bindings(void)
 static void
 destroy_put_mac_bindings(void)
 {
+    mac_bindings_clear(&put_mac_bindings);
     hmap_destroy(&put_mac_bindings);
 }
 
@@ -4390,13 +4496,9 @@ run_buffered_binding(const struct sbrec_mac_binding_table *mac_binding_table,
 }
 
 static void
-wait_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn)
+wait_put_mac_bindings(void)
     OVS_REQUIRES(pinctrl_mutex)
 {
-    if (!ovnsb_idl_txn) {
-        return;
-    }
-
     struct mac_binding *mb;
     HMAP_FOR_EACH (mb, hmap_node, &put_mac_bindings) {
         poll_timer_wait_until(mb->timestamp);
@@ -4413,6 +4515,7 @@ wait_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn)
  * their port-mac and ARP tables.
  */
 struct garp_rarp_data {
+    struct cmap_node cmap_node;
     struct eth_addr ea;          /* Ethernet address of port. */
     ovs_be32 ipv4;               /* Ipv4 address of port. */
     long long int announce_time; /* Next announcement in ms. */
@@ -4420,10 +4523,18 @@ struct garp_rarp_data {
                                   * announcement (in msecs). */
     uint32_t dp_key;             /* Datapath used to output this GARP. */
     uint32_t port_key;           /* Port to inject the GARP into. */
+    char *logical_port;          /* Name of the cr logical_port, if any */
+    bool stale;                  /* Used during sync to remove stale
+                                  * information. */
 };
 
 /* Contains GARPs/RARPs to be sent. Protected by pinctrl_mutex*/
 static struct shash send_garp_rarp_data;
+
+struct laddrs_port {
+    struct lport_addresses laddrs;
+    char *lport;
+};
 
 static void
 init_send_garps_rarps(void)
@@ -4434,13 +4545,52 @@ init_send_garps_rarps(void)
 static void
 destroy_send_garps_rarps(void)
 {
+    struct shash_node *iter;
+    SHASH_FOR_EACH (iter, &send_garp_rarp_data) {
+        struct garp_rarp_data *garp_rarp = iter->data;
+        free(garp_rarp->logical_port);
+    }
+
     shash_destroy_free_data(&send_garp_rarp_data);
 }
+
+static void
+garp_rarp_node_reset_timers(const char *logical_port)
+{
+    struct shash_node *iter;
+    bool changed = false;
+    SHASH_FOR_EACH (iter, &send_garp_rarp_data) {
+        struct garp_rarp_data *garp_rarp_data = iter->data;
+        if (garp_rarp_data->logical_port &&
+            !strcmp(garp_rarp_data->logical_port, logical_port)) {
+            changed = true;
+            garp_rarp_data->announce_time = time_msec() + 1000;
+            garp_rarp_data->backoff = 1000;
+        }
+    }
+    if (changed) {
+        notify_pinctrl_handler();
+    }
+}
+
+static void
+reset_timers_for_claimed_cr(struct if_status_mgr *mgr)
+{
+    struct sset *claimed_cr = get_claimed_cr(mgr);
+    const char *cr_logical_port;
+    SSET_FOR_EACH_SAFE (cr_logical_port, claimed_cr) {
+        garp_rarp_node_reset_timers(cr_logical_port);
+        sset_delete(claimed_cr, SSET_NODE_FROM_NAME(cr_logical_port));
+    }
+
+}
+
 
 /* Runs with in the main ovn-controller thread context. */
 static void
 add_garp_rarp(const char *name, const struct eth_addr ea, ovs_be32 ip,
-              uint32_t dp_key, uint32_t port_key)
+              uint32_t dp_key, uint32_t port_key,
+              const char *logical_port)
 {
     struct garp_rarp_data *garp_rarp = xmalloc(sizeof *garp_rarp);
     garp_rarp->ea = ea;
@@ -4449,6 +4599,8 @@ add_garp_rarp(const char *name, const struct eth_addr ea, ovs_be32 ip,
     garp_rarp->backoff = 1000; /* msec. */
     garp_rarp->dp_key = dp_key;
     garp_rarp->port_key = port_key;
+    garp_rarp->stale = false;
+    garp_rarp->logical_port = nullable_xstrdup(logical_port);
     shash_add(&send_garp_rarp_data, name, garp_rarp);
 
     /* Notify pinctrl_handler so that it can wakeup and process
@@ -4479,9 +4631,10 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
      * distributed gateway ports. */
     if (!strcmp(binding_rec->type, "l3gateway")
         || !strcmp(binding_rec->type, "patch")) {
-        struct lport_addresses *laddrs = NULL;
-        while ((laddrs = shash_find_and_delete(nat_addresses,
-                                               binding_rec->logical_port))) {
+        struct laddrs_port *laddrs_port = NULL;
+        while ((laddrs_port = shash_find_and_delete(nat_addresses,
+                                                binding_rec->logical_port))) {
+            struct lport_addresses *laddrs = &laddrs_port->laddrs;
             int i;
             for (i = 0; i < laddrs->n_ipv4_addrs; i++) {
                 char *name = xasprintf("%s-%s", binding_rec->logical_port,
@@ -4490,6 +4643,7 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
                 if (garp_rarp) {
                     garp_rarp->dp_key = binding_rec->datapath->tunnel_key;
                     garp_rarp->port_key = binding_rec->tunnel_key;
+                    garp_rarp->stale = false;
                     if (garp_max_timeout != garp_rarp_max_timeout ||
                         garp_continuous != garp_rarp_continuous) {
                         /* reset backoff */
@@ -4500,7 +4654,8 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
                     add_garp_rarp(name, laddrs->ea,
                                   laddrs->ipv4_addrs[i].addr,
                                   binding_rec->datapath->tunnel_key,
-                                  binding_rec->tunnel_key);
+                                  binding_rec->tunnel_key,
+                                  laddrs_port->lport);
                     send_garp_locally(ovnsb_idl_txn,
                                       sbrec_mac_binding_by_lport_ip,
                                       local_datapaths, binding_rec, laddrs->ea,
@@ -4520,6 +4675,7 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
                     if (garp_rarp) {
                         garp_rarp->dp_key = binding_rec->datapath->tunnel_key;
                         garp_rarp->port_key = binding_rec->tunnel_key;
+                        garp_rarp->stale = false;
                         if (garp_max_timeout != garp_rarp_max_timeout ||
                             garp_continuous != garp_rarp_continuous) {
                             /* reset backoff */
@@ -4529,12 +4685,14 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
                     } else {
                         add_garp_rarp(name, laddrs->ea,
                                       0, binding_rec->datapath->tunnel_key,
-                                      binding_rec->tunnel_key);
+                                      binding_rec->tunnel_key,
+                                      laddrs_port->lport);
                     }
                     free(name);
             }
             destroy_lport_addresses(laddrs);
-            free(laddrs);
+            free(laddrs_port->lport);
+            free(laddrs_port);
         }
         return;
     }
@@ -4545,6 +4703,7 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
     if (garp_rarp) {
         garp_rarp->dp_key = binding_rec->datapath->tunnel_key;
         garp_rarp->port_key = binding_rec->tunnel_key;
+        garp_rarp->stale = false;
         if (garp_max_timeout != garp_rarp_max_timeout ||
             garp_continuous != garp_rarp_continuous) {
             /* reset backoff */
@@ -4570,7 +4729,7 @@ send_garp_rarp_update(struct ovsdb_idl_txn *ovnsb_idl_txn,
         add_garp_rarp(binding_rec->logical_port,
                       laddrs.ea, ip,
                       binding_rec->datapath->tunnel_key,
-                      binding_rec->tunnel_key);
+                      binding_rec->tunnel_key, NULL);
         if (ip) {
             send_garp_locally(ovnsb_idl_txn, sbrec_mac_binding_by_lport_ip,
                               local_datapaths, binding_rec, laddrs.ea, ip);
@@ -4587,6 +4746,7 @@ send_garp_rarp_delete(const char *lport)
 {
     struct garp_rarp_data *garp_rarp = shash_find_and_delete
                                        (&send_garp_rarp_data, lport);
+    free(garp_rarp->logical_port);
     free(garp_rarp);
     notify_pinctrl_handler();
 }
@@ -5257,6 +5417,9 @@ ip_mcast_sync(struct ovsdb_idl_txn *ovnsb_idl_txn,
         struct ip_mcast_snoop_cfg cfg;
         bool flush_groups = false;
 
+        if (!get_local_datapath(local_datapaths, dp_key)) {
+            continue;
+        }
         ip_mcast_snoop_cfg_load(&cfg, ip_mcast);
         if (ip_mcast_snoop_state_update(dp_key, &cfg, &flush_groups)) {
             notify = true;
@@ -5336,7 +5499,7 @@ ip_mcast_sync(struct ovsdb_idl_txn *ovnsb_idl_txn,
         struct local_datapath *local_dp =
             get_local_datapath(local_datapaths, ip_ms->dp_key);
 
-        if (!local_dp) {
+        if (!local_dp || !local_dp->is_switch) {
             continue;
         }
 
@@ -5887,7 +6050,9 @@ consider_nat_address(struct ovsdb_idl_index *sbrec_port_binding_by_name,
                      const struct sbrec_chassis *chassis,
                      struct shash *nat_addresses)
 {
-    struct lport_addresses *laddrs = xmalloc(sizeof *laddrs);
+    struct laddrs_port *laddrs_port = xmalloc(sizeof *laddrs_port);
+    struct lport_addresses *laddrs = &laddrs_port->laddrs;
+
     char *lport = NULL;
     const struct sbrec_port_binding *cr_pb = NULL;
     bool rc = extract_addresses_with_port(nat_address, laddrs, &lport);
@@ -5898,11 +6063,10 @@ consider_nat_address(struct ovsdb_idl_index *sbrec_port_binding_by_name,
         || (!lport && !strcmp(pb->type, "patch"))
         || (lport && (!cr_pb || (cr_pb->chassis != chassis)))) {
         destroy_lport_addresses(laddrs);
-        free(laddrs);
         free(lport);
+        free(laddrs_port);
         return;
     }
-    free(lport);
 
     int i;
     for (i = 0; i < laddrs->n_ipv4_addrs; i++) {
@@ -5916,7 +6080,8 @@ consider_nat_address(struct ovsdb_idl_index *sbrec_port_binding_by_name,
         sset_add(nat_address_keys, name);
         free(name);
     }
-    shash_add(nat_addresses, pb->logical_port, laddrs);
+    laddrs_port->lport = lport;
+    shash_add(nat_addresses, pb->logical_port, laddrs_port);
 }
 
 static void
@@ -5989,6 +6154,28 @@ send_garp_rarp_run(struct rconn *swconn, long long int *send_garp_rarp_time)
     }
 }
 
+static bool
+garp_rarp_is_enabled(struct ovsdb_idl_index *sbrec_port_binding_by_name,
+                     const struct sbrec_port_binding *pb)
+{
+    if (smap_get_bool(&pb->options, "disable_garp_rarp", false)) {
+        return false;
+    }
+
+    /* Check if GARP probing is disabled on the peer logical router. */
+    const struct sbrec_port_binding *peer = lport_get_peer(
+            pb, sbrec_port_binding_by_name);
+    if (!peer) {
+        peer = lport_get_l3gw_peer(pb, sbrec_port_binding_by_name);
+    }
+    if (peer && smap_get_bool(&peer->datapath->external_ids,
+                              "disable_garp_rarp", false)) {
+        return false;
+    }
+
+    return true;
+}
+
 /* Called by pinctrl_run(). Runs with in the main ovn-controller
  * thread context. */
 static void
@@ -5999,7 +6186,8 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
                        const struct ovsrec_bridge *br_int,
                        const struct sbrec_chassis *chassis,
                        const struct hmap *local_datapaths,
-                       const struct ovsrec_open_vswitch_table *ovs_table)
+                       const struct ovsrec_open_vswitch_table *ovs_table,
+                       struct if_status_mgr *mgr)
     OVS_REQUIRES(pinctrl_mutex)
 {
     struct sset localnet_vifs = SSET_INITIALIZER(&localnet_vifs);
@@ -6021,6 +6209,7 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
 
     shash_init(&nat_addresses);
 
+    reset_timers_for_claimed_cr(mgr);
     get_localnet_vifs_l3gwports(sbrec_port_binding_by_datapath,
                                 sbrec_port_binding_by_name,
                                 br_int, chassis, local_datapaths,
@@ -6033,10 +6222,8 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
      * send_garp_rarp_data. */
     struct shash_node *iter;
     SHASH_FOR_EACH_SAFE (iter, &send_garp_rarp_data) {
-        if (!sset_contains(&localnet_vifs, iter->name) &&
-            !sset_contains(&nat_ip_keys, iter->name)) {
-            send_garp_rarp_delete(iter->name);
-        }
+        struct garp_rarp_data *garp_rarp = iter->data;
+        garp_rarp->stale = true;
     }
 
     /* Update send_garp_rarp_data. */
@@ -6044,7 +6231,7 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
     SSET_FOR_EACH (iface_id, &localnet_vifs) {
         const struct sbrec_port_binding *pb = lport_lookup_by_name(
             sbrec_port_binding_by_name, iface_id);
-        if (pb) {
+        if (pb && garp_rarp_is_enabled(sbrec_port_binding_by_name, pb)) {
             send_garp_rarp_update(ovnsb_idl_txn,
                                   sbrec_mac_binding_by_lport_ip,
                                   local_datapaths, pb, &nat_addresses,
@@ -6057,7 +6244,7 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
     SSET_FOR_EACH (gw_port, &local_l3gw_ports) {
         const struct sbrec_port_binding *pb
             = lport_lookup_by_name(sbrec_port_binding_by_name, gw_port);
-        if (pb) {
+        if (pb && garp_rarp_is_enabled(sbrec_port_binding_by_name, pb)) {
             send_garp_rarp_update(ovnsb_idl_txn, sbrec_mac_binding_by_lport_ip,
                                   local_datapaths, pb, &nat_addresses,
                                   garp_max_timeout, garp_continuous);
@@ -6066,14 +6253,22 @@ send_garp_rarp_prepare(struct ovsdb_idl_txn *ovnsb_idl_txn,
 
     /* pinctrl_handler thread will send the GARPs. */
 
+    SHASH_FOR_EACH_SAFE (iter, &send_garp_rarp_data) {
+        struct garp_rarp_data *garp_rarp = iter->data;
+        if (garp_rarp->stale) {
+            send_garp_rarp_delete(iter->name);
+        }
+    }
+
     sset_destroy(&localnet_vifs);
     sset_destroy(&local_l3gw_ports);
 
     SHASH_FOR_EACH_SAFE (iter, &nat_addresses) {
-        struct lport_addresses *laddrs = iter->data;
-        destroy_lport_addresses(laddrs);
+        struct laddrs_port *laddrs_port = iter->data;
+        destroy_lport_addresses(&laddrs_port->laddrs);
         shash_delete(&nat_addresses, iter);
-        free(laddrs);
+        free(laddrs_port->lport);
+        free(laddrs_port);
     }
     shash_destroy(&nat_addresses);
 
@@ -6361,12 +6556,8 @@ exit:
 }
 
 static void
-wait_controller_event(struct ovsdb_idl_txn *ovnsb_idl_txn)
+wait_controller_event(void)
 {
-    if (!ovnsb_idl_txn) {
-        return;
-    }
-
     for (size_t i = 0; i < OVN_EVENT_MAX; i++) {
         if (!hmap_is_empty(&event_table[i])) {
             poll_immediate_wake();
@@ -6511,9 +6702,9 @@ destroy_put_vport_bindings(void)
 }
 
 static void
-wait_put_vport_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn)
+wait_put_vport_bindings(void)
 {
-    if (ovnsb_idl_txn && !hmap_is_empty(&put_vport_bindings)) {
+    if (!hmap_is_empty(&put_vport_bindings)) {
         poll_immediate_wake();
     }
 }
@@ -6812,7 +7003,7 @@ sync_svc_monitors(struct ovsdb_idl_txn *ovnsb_idl_txn,
             continue;
         }
 
-        if (pb->chassis != our_chassis) {
+        if ((pb->chassis != our_chassis) || (pb->n_up && !pb->up[0])) {
             continue;
         }
 
@@ -6905,16 +7096,16 @@ sync_svc_monitors(struct ovsdb_idl_txn *ovnsb_idl_txn,
             svc_mon->n_success = 0;
             svc_mon->n_failures = 0;
 
-            eth_addr_from_string(sb_svc_mon->src_mac, &svc_mon->src_mac);
-            ip46_parse(sb_svc_mon->src_ip, &svc_mon->src_ip);
-
             hmap_insert(&svc_monitors_map, &svc_mon->hmap_node, hash);
             ovs_list_push_back(&svc_monitors, &svc_mon->list_node);
             changed = true;
         }
 
+        eth_addr_from_string(sb_svc_mon->src_mac, &svc_mon->src_mac);
+        ip46_parse(sb_svc_mon->src_ip, &svc_mon->src_ip);
         svc_mon->sb_svc_mon = sb_svc_mon;
         svc_mon->ea = ea;
+
         if (!smap_equal(&svc_mon->options, &sb_svc_mon->options)) {
             smap_destroy(&svc_mon->options);
             smap_clone(&svc_mon->options, &sb_svc_mon->options);
@@ -7307,6 +7498,13 @@ pinctrl_check_bfd_msg(const struct flow *ip_flow, struct dp_packet *pkt_in)
     if (udp_hdr->udp_dst != htons(BFD_DEST_PORT)) {
         VLOG_DBG_RL(&rl, "BFD action on wrong UDP dst port (%"PRIx16")",
                     ntohs(udp_hdr->udp_dst));
+        return false;
+    }
+
+    size_t dlen = MIN(ntohs(udp_hdr->udp_len), dp_packet_l4_size(pkt_in));
+    if (dlen < UDP_HEADER_LEN + sizeof (struct bfd_msg)) {
+        VLOG_DBG_RL(&rl, "BFD action on malformed BFD msg (%"PRIxSIZE")",
+                    dlen);
         return false;
     }
 
@@ -7829,22 +8027,25 @@ svc_monitors_run(struct rconn *swconn,
             break;
 
         case SVC_MON_S_WAITING:
-            if (current_time > svc_mon->wait_time) {
+            if (current_time >= svc_mon->wait_time) {
+                svc_mon->next_send_time = current_time + svc_mon->interval;
+                next_run_time = svc_mon->next_send_time;
                 if (svc_mon->protocol ==  SVC_MON_PROTO_TCP) {
                     svc_mon->n_failures++;
                     svc_mon->state = SVC_MON_S_OFFLINE;
+                    goto offline;
                 } else {
                     svc_mon->n_success++;
                     svc_mon->state = SVC_MON_S_ONLINE;
+                    goto online;
                 }
-                svc_mon->next_send_time = current_time + svc_mon->interval;
-                next_run_time = svc_mon->next_send_time;
             } else {
                 next_run_time = svc_mon->wait_time;
             }
             break;
 
         case SVC_MON_S_ONLINE:
+            online:
             if (svc_mon->n_success >= svc_mon->success_count) {
                 svc_mon->status = SVC_MON_ST_ONLINE;
                 svc_mon->n_success = 0;
@@ -7860,6 +8061,7 @@ svc_monitors_run(struct rconn *swconn,
             break;
 
         case SVC_MON_S_OFFLINE:
+            offline:
             if (svc_mon->n_failures >= svc_mon->failure_count) {
                 svc_mon->status = SVC_MON_ST_OFFLINE;
                 svc_mon->n_success = 0;
@@ -8316,6 +8518,7 @@ init_fdb_entries(void)
 static void
 destroy_fdb_entries(void)
 {
+    fdbs_clear(&put_fdbs);
     hmap_destroy(&put_fdbs);
 }
 
@@ -8340,7 +8543,7 @@ run_put_fdb(struct ovsdb_idl_txn *ovnsb_idl_txn,
             struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac,
             struct ovsdb_idl_index *sbrec_port_binding_by_key,
             struct ovsdb_idl_index *sbrec_datapath_binding_by_key,
-            const struct fdb *fdb)
+            struct fdb *fdb, uint64_t cur_cfg)
 {
     /* Convert ethernet argument to string form for database. */
     char mac_string[ETH_ADDR_STRLEN + 1];
@@ -8350,59 +8553,75 @@ run_put_fdb(struct ovsdb_idl_txn *ovnsb_idl_txn,
     /* Update or add an FDB entry. */
     const struct sbrec_port_binding *sb_entry_pb = NULL;
     const struct sbrec_port_binding *new_entry_pb = NULL;
+    bool skip_fdb_update = false;
     const struct sbrec_fdb *sb_fdb =
             fdb_lookup(sbrec_fdb_by_dp_key_mac, fdb->data.dp_key, mac_string);
+
     if (!sb_fdb) {
         sb_fdb = sbrec_fdb_insert(ovnsb_idl_txn);
         sbrec_fdb_set_dp_key(sb_fdb, fdb->data.dp_key);
         sbrec_fdb_set_mac(sb_fdb, mac_string);
     } else {
-        /* check whether sb_fdb->port_key is vif or localnet type */
-        sb_entry_pb = lport_lookup_by_key(
-            sbrec_datapath_binding_by_key, sbrec_port_binding_by_key,
-            sb_fdb->dp_key, sb_fdb->port_key);
         new_entry_pb = lport_lookup_by_key(
             sbrec_datapath_binding_by_key, sbrec_port_binding_by_key,
             fdb->data.dp_key, fdb->data.port_key);
-    }
-    /* Do not have localnet overwrite a previous vif entry */
-    if (!sb_entry_pb || !new_entry_pb || strcmp(sb_entry_pb->type, "") ||
-        strcmp(new_entry_pb->type, "localnet")) {
-        sbrec_fdb_set_port_key(sb_fdb, fdb->data.port_key);
+
+        if (new_entry_pb && !strcmp(new_entry_pb->type, "localnet")) {
+            /* Have the commit fail if sb_fdb->port_key gets updated by other
+             * controller, to avoid overwriting a vif. */
+            sbrec_fdb_verify_port_key(sb_fdb);
+            sb_entry_pb = lport_lookup_by_key(
+                sbrec_datapath_binding_by_key, sbrec_port_binding_by_key,
+                sb_fdb->dp_key, sb_fdb->port_key);
+            /* Do not have localnet overwrite a previous vif entry */
+            if (sb_entry_pb && !strcmp(sb_entry_pb->type, "")) {
+                skip_fdb_update = true;
+            }
+        }
     }
 
-    /* For backward compatibility check if timestamp column is available
-     * in SB DB. */
-    if (pinctrl.fdb_can_timestamp) {
-        sbrec_fdb_set_timestamp(sb_fdb, time_wall_msec());
+    if (!skip_fdb_update) {
+        sbrec_fdb_set_port_key(sb_fdb, fdb->data.port_key);
+        fdb->cfg = cur_cfg;
+        /* For backward compatibility check if timestamp column is available
+         * in SB DB. */
+        if (pinctrl.fdb_can_timestamp) {
+            sbrec_fdb_set_timestamp(sb_fdb, time_wall_msec());
+        }
+    } else {
+        fdb_remove(&put_fdbs, fdb);
     }
+
 }
 
 static void
 run_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn,
              struct ovsdb_idl_index *sbrec_port_binding_by_key,
              struct ovsdb_idl_index *sbrec_datapath_binding_by_key,
-             struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac)
+             struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac, uint64_t cur_cfg)
              OVS_REQUIRES(pinctrl_mutex)
 {
     if (!ovnsb_idl_txn) {
         return;
     }
 
-    const struct fdb *fdb;
-    HMAP_FOR_EACH (fdb, hmap_node, &put_fdbs) {
-        run_put_fdb(ovnsb_idl_txn, sbrec_fdb_by_dp_key_mac,
-                    sbrec_port_binding_by_key,
-                    sbrec_datapath_binding_by_key, fdb);
+    struct fdb *fdb;
+    HMAP_FOR_EACH_SAFE (fdb, hmap_node, &put_fdbs) {
+        if (fdb->cfg >= 0 && pinctrl_is_sb_commited(fdb->cfg, cur_cfg)) {
+            fdb_remove(&put_fdbs, fdb);
+        } else {
+            run_put_fdb(ovnsb_idl_txn, sbrec_fdb_by_dp_key_mac,
+                        sbrec_port_binding_by_key,
+                        sbrec_datapath_binding_by_key, fdb, cur_cfg);
+        }
     }
-    fdbs_clear(&put_fdbs);
 }
 
 
 static void
-wait_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn)
+wait_put_fdbs(void)
 {
-    if (ovnsb_idl_txn && !hmap_is_empty(&put_fdbs)) {
+    if (!hmap_is_empty(&put_fdbs)) {
         poll_immediate_wake();
     }
 }

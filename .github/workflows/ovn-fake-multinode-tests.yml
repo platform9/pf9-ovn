@@ -17,8 +17,7 @@ jobs:
     strategy:
       matrix:
         cfg:
-        - { branch: "main" }
-        - { branch: "branch-22.03" }
+        - { branch: "${{ github.ref_name }}" }
     env:
       RUNC_CMD: podman
       OS_IMAGE: "fedora:42"
@@ -26,24 +25,24 @@ jobs:
       XDG_RUNTIME_DIR: ''
     steps:
     - name: Check out ovn-fake-multi-node
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: 'ovn-org/ovn-fake-multinode'
         path: 'ovn-fake-multinode'
-        ref: 'v0.1'
+        ref: 'v0.4'
 
     # Check out ovn and ovs separately inside ovn-fake-multinode/ovn and ovn-fake-multinode/ovs
     # ovn-fake-multinode builds and installs ovs from ovn-fake-multinode/ovs
     # and it builds and installs ovn from ovn-fake-multinode/ovn. It uses the ovs submodule for ovn compilation.
-    - name: Check out ovs master
+    - name: Check out ovs main
       uses: actions/checkout@v4
       with:
         path: 'ovn-fake-multinode/ovs'
         repository: 'openvswitch/ovs'
-        ref: 'master'
+        ref: 'main'
 
     - name: Check out ovn ${{ matrix.cfg.branch }}
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         path: 'ovn-fake-multinode/ovn'
         submodules: recursive
@@ -75,29 +74,28 @@ jobs:
         sudo podman save ovn/ovn-multi-node:${{ matrix.cfg.branch }} > /tmp/_output/ovn_${{ matrix.cfg.branch }}_image.tar
       working-directory: ovn-fake-multinode
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v7
       with:
         name: test-${{ matrix.cfg.branch }}-image
         path: /tmp/_output/ovn_${{ matrix.cfg.branch }}_image.tar
 
   multinode-tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 60
     needs: [build]
     strategy:
       fail-fast: false
       matrix:
         cfg:
-        - { branch: "main", testsuiteflags: ""}
-        - { branch: "branch-22.03", testsuiteflags: "-k 'basic test'" }
+        - { branch: "${{ github.ref_name }}", testsuiteflags: ""}
     name: multinode tests ${{ join(matrix.cfg.*, ' ') }}
     env:
       RUNC_CMD: podman
       OS_IMAGE: "fedora:42"
       CENTRAL_IMAGE: "ovn/ovn-multi-node:${{ matrix.cfg.branch }}"
-      CHASSIS_IMAGE: "ovn/ovn-multi-node:main"
-      RELAY_IMAGE: "ovn/ovn-multi-node:main"
-      GW_IMAGE: "ovn/ovn-multi-node:main"
+      CHASSIS_IMAGE: "ovn/ovn-multi-node:${{ github.ref_name }}"
+      RELAY_IMAGE: "ovn/ovn-multi-node:${{ github.ref_name }}"
+      GW_IMAGE: "ovn/ovn-multi-node:${{ github.ref_name }}"
       # Disable SSL for now. Revisit this if required.
       ENABLE_SSL: no
       CC: gcc
@@ -112,7 +110,7 @@ jobs:
 
     steps:
     - name: Check out ovn
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: install required dependencies
       run:  |
@@ -134,25 +132,20 @@ jobs:
         . .ci/linux-util.sh
         free_up_disk_space_ubuntu
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v8
       with:
-        name: test-main-image
-
-    - uses: actions/download-artifact@v4
-      with:
-        name: test-branch-22.03-image
+        name: test-${{ github.ref_name }}-image
 
     - name: Load podman image
       run: |
-        sudo podman load --input ovn_main_image.tar
-        sudo podman load --input ovn_branch-22.03_image.tar
+        sudo podman load --input ovn_${{ github.ref_name }}_image.tar
 
     - name: Check out ovn-fake-multi-node
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: 'ovn-org/ovn-fake-multinode'
         path: 'ovn-fake-multinode'
-        ref: 'v0.1'
+        ref: 'v0.4'
 
     - name: Start openvswitch
       run: |
@@ -161,9 +154,9 @@ jobs:
 
     - name: Start basic cluster
       run: |
-        sudo -E ./ovn_cluster.sh start
-        sudo podman exec -it ovn-central ovn-nbctl show
-        sudo podman exec -it ovn-central ovn-appctl -t ovn-northd version
+        sudo -E CHASSIS_COUNT=4 GW_COUNT=4 ./ovn_cluster.sh start
+        sudo podman exec -it ovn-central-az1 ovn-nbctl show
+        sudo podman exec -it ovn-central-az1 ovn-appctl -t ovn-northd version
         sudo podman exec -it ovn-chassis-1 ovn-appctl -t ovn-controller version
       working-directory: ovn-fake-multinode
 
@@ -178,12 +171,12 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
 
     - name: set up python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.12'
 
     - name: Check out ovn
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         path: 'ovn'
         submodules: recursive
@@ -199,8 +192,8 @@ jobs:
     - name: Run fake-multinode system tests
       run: |
         if ! sudo make check-multinode TESTSUITEFLAGS="${{ matrix.cfg.testsuiteflags }}"; then
-          sudo podman exec -it ovn-central ovn-nbctl show || :
-          sudo podman exec -it ovn-central ovn-sbctl show || :
+          sudo podman exec -it ovn-central-az1 ovn-nbctl show || :
+          sudo podman exec -it ovn-central-az1 ovn-sbctl show || :
           sudo podman exec -it ovn-chassis-1 ovs-vsctl show || :
           sudo podman exec -it ovn-chassis-1 ip netns || :
           sudo podman exec -it ovn-chassis-1 cat /var/log/ovn/ovn-controller.log || :
@@ -225,7 +218,7 @@ jobs:
 
     - name: upload logs on failure
       if: failure() || cancelled()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: logs-linux-${{ join(matrix.cfg.*, '-') }}
         path: logs.tgz

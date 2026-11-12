@@ -1447,11 +1447,22 @@ ofctrl_add_or_append_flow(struct ovn_desired_flow_table *desired_flows,
          * actions properly when handle addrset ip deletion, instead of simply
          * delete the flow. */
         struct sb_flow_ref *sfr;
+        bool duplicate = false;
         LIST_FOR_EACH (sfr, sb_list, &f->references) {
+            duplicate |= uuid_equals(&sfr->sb_uuid, sb_uuid);
             ovs_list_remove(&sfr->as_ip_flow_list);
             ovs_list_init(&sfr->as_ip_flow_list);
         }
-        link_flow_to_sb(desired_flows, f, sb_uuid, NULL);
+
+        if (duplicate) {
+            static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
+            char *s = ovn_flow_to_string(&f->flow);
+            VLOG_WARN_RL(&rl, "lflow "UUID_FMT" already references desired "
+                         "flow: %s", UUID_ARGS(sb_uuid), s);
+            free(s);
+        } else {
+            link_flow_to_sb(desired_flows, f, sb_uuid, NULL);
+        }
     } else {
         hmap_insert(&desired_flows->match_flow_table, &f->match_hmap_node,
                     f->flow.hash);
@@ -3008,16 +3019,6 @@ ofctrl_put(struct ovn_desired_flow_table *lflow_table,
                 mem_stats.oflow_update_usage -= ofctrl_flow_update_size(fup);
                 ovs_list_remove(&fup->list_node);
                 free(fup);
-            } else if (req_cfg == fup->req_cfg) {
-                /* This ofctrl_flow_update is for the same configuration as
-                 * 'req_cfg'.  Probably, some change to the physical topology
-                 * means that we had to revise the OpenFlow flow table even
-                 * though the logical topology did not change.  Update fp->xid,
-                 * so that we don't send a notification that we're up-to-date
-                 * until we're really caught up. */
-                VLOG_DBG("advanced xid target for req_cfg=%"PRId64, req_cfg);
-                fup->xid = xid_;
-                goto done;
             } else {
                 break;
             }
@@ -3029,7 +3030,6 @@ ofctrl_put(struct ovn_desired_flow_table *lflow_table,
         fup->xid = xid_;
         fup->req_cfg = req_cfg;
         mem_stats.oflow_update_usage += ofctrl_flow_update_size(fup);
-    done:;
     } else if (!ovs_list_is_empty(&flow_updates)) {
         /* Getting up-to-date with 'req_cfg' didn't require any extra flow
          * table changes, so whenever we get up-to-date with the most recent

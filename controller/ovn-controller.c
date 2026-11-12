@@ -327,7 +327,8 @@ update_sb_monitors(struct ovsdb_idl *ovnsb_idl,
              * for those. */
             const struct sbrec_port_binding *local_pb
                 = local_binding_get_primary_pb(local_bindings, name);
-            if (local_pb && get_lport_type(local_pb) == LP_VIF) {
+            if (local_pb && get_lport_type(local_pb) == LP_VIF &&
+                local_pb->chassis == chassis) {
                 continue;
             }
             sbrec_port_binding_add_clause_logical_port(&pb, OVSDB_F_EQ, name);
@@ -1900,15 +1901,12 @@ runtime_data_sb_ro_handler(struct engine_node *node, void *data)
     }
     if (chassis) {
         struct ed_type_runtime_data *rt_data = data;
-        bool sb_readonly = !engine_get_context()->ovnsb_idl_txn;
         struct controller_engine_ctx *ctrl_ctx =
             engine_get_context()->client_ctx;
 
-        if (if_status_handle_claims(ctrl_ctx->if_mgr,
-                                    &rt_data->lbinding_data,
-                                    chassis,
-                                    &rt_data->tracked_dp_bindings,
-                                    pb_table, sb_readonly)) {
+        if (if_status_handle_claims(ctrl_ctx->if_mgr, &rt_data->lbinding_data,
+                                    chassis, &rt_data->tracked_dp_bindings,
+                                    pb_table)) {
             engine_set_node_state(node, EN_UPDATED);
             rt_data->tracked = true;
         }
@@ -2734,9 +2732,29 @@ ct_zones_runtime_data_handler(struct engine_node *node, void *data)
             if (strcmp(t_lport->pb->type, "")
                 && strcmp(t_lport->pb->type, "localport")
                 && strcmp(t_lport->pb->type, "l3gateway")
-                && strcmp(t_lport->pb->type, "localnet")) {
+                && strcmp(t_lport->pb->type, "localnet")
+                && strcmp(t_lport->pb->type, "patch")) {
                 /* We allocate zone-id's only to VIF, localport, l3gateway,
-                 * and localnet lports. */
+                 * localnet and patch (enabled ACL) lports. */
+                continue;
+            }
+
+            /* For patch ports without ACL flag, delete the ct_zone. */
+            if (!strcmp(t_lport->pb->type, "patch") &&
+                !smap_get_bool(&t_lport->pb->options,
+                               "enable_router_port_acl", false)) {
+                struct simap_node *ct_zone =
+                simap_find(&ct_zones_data->current,
+                            t_lport->pb->logical_port);
+                if (ct_zone) {
+                    add_pending_ct_zone_entry(
+                        &ct_zones_data->pending, CT_ZONE_OF_QUEUED,
+                        ct_zone->data, false, ct_zone->name);
+
+                    bitmap_set0(ct_zones_data->bitmap, ct_zone->data);
+                    simap_delete(&ct_zones_data->current, ct_zone);
+                    updated = true;
+                }
                 continue;
             }
 
@@ -3421,7 +3439,7 @@ mac_cache_mb_handle_for_datapath(struct mac_cache_data *data,
                                  const struct sbrec_datapath_binding *dp,
                                  struct ovsdb_idl_index *sbrec_mb_by_dp)
 {
-    bool has_threshold = mac_cache_threshold_find(data, dp->tunnel_key);
+    bool has_threshold = !!mac_cache_threshold_find(data, dp->tunnel_key);
 
     struct sbrec_mac_binding *mb_index_row =
             sbrec_mac_binding_index_init_row(sbrec_mb_by_dp);
@@ -3444,7 +3462,7 @@ mac_cache_fdb_handle_for_datapath(struct mac_cache_data *data,
                                   const struct sbrec_datapath_binding *dp,
                                   struct ovsdb_idl_index *sbrec_fdb_by_dp_key)
 {
-    bool has_threshold = mac_cache_threshold_find(data, dp->tunnel_key);
+    bool has_threshold = !!mac_cache_threshold_find(data, dp->tunnel_key);
 
     struct sbrec_fdb *fdb_index_row =
             sbrec_fdb_index_init_row(sbrec_fdb_by_dp_key);
@@ -4652,8 +4670,9 @@ lflow_output_runtime_data_handler(struct engine_node *node,
         struct shash_node *shash_node;
         SHASH_FOR_EACH (shash_node, &tdp->lports) {
             struct tracked_lport *lport = shash_node->data;
-            if (!lflow_handle_flows_for_lport(lport->pb, &l_ctx_in,
-                                                &l_ctx_out)) {
+            if (!lflow_handle_flows_for_lport(
+                    lport->pb, &l_ctx_in, &l_ctx_out,
+                    lport->tracked_type == TRACKED_RESOURCE_REMOVED)) {
                 return false;
             }
         }
@@ -5267,6 +5286,16 @@ check_northd_version(struct ovsdb_idl *ovs_idl, struct ovsdb_idl *ovnsb_idl,
     return true;
 }
 
+static void
+ovsdb_idl_loop_next_cfg_inc(struct ovsdb_idl_loop *idl_loop)
+{
+    if (idl_loop->next_cfg == INT64_MAX) {
+        idl_loop->next_cfg = 0;
+    } else {
+        idl_loop->next_cfg++;
+    }
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -5392,6 +5421,9 @@ main(int argc, char *argv[])
     struct ovsdb_idl_index *sbrec_chassis_template_var_index_by_chassis
         = ovsdb_idl_index_create1(ovnsb_idl_loop.idl,
                                   &sbrec_chassis_template_var_col_chassis);
+    struct ovsdb_idl_index *sbrec_encaps_index_by_ip_and_type
+        = ovsdb_idl_index_create2(ovnsb_idl_loop.idl,
+                                  &sbrec_encap_col_type, &sbrec_encap_col_ip);
 
     ovsdb_idl_track_add_all(ovnsb_idl_loop.idl);
     ovsdb_idl_omit_alert(ovnsb_idl_loop.idl,
@@ -5821,6 +5853,7 @@ main(int argc, char *argv[])
     VLOG_INFO("OVN internal version is : [%s]", ovn_version);
 
     /* Main loop. */
+    int ovnsb_txn_status = 1;
     bool sb_monitor_all = false;
     while (!exit_args.exiting) {
         ovsrcu_quiesce_end();
@@ -5870,6 +5903,9 @@ main(int argc, char *argv[])
             = ovsdb_idl_loop_run(&ovnsb_idl_loop);
         unsigned int new_ovnsb_cond_seqno
             = ovsdb_idl_get_condition_seqno(ovnsb_idl_loop.idl);
+        if (ovnsb_idl_txn && ovnsb_txn_status == -1) {
+            ovsdb_idl_loop_next_cfg_inc(&ovnsb_idl_loop);
+        }
         if (new_ovnsb_cond_seqno != ovnsb_cond_seqno) {
             if (!new_ovnsb_cond_seqno) {
                 VLOG_INFO("OVNSB IDL reconnected, force recompute.");
@@ -5911,6 +5947,24 @@ main(int argc, char *argv[])
                 ovsrec_open_vswitch_update_other_config_setkey(
                     cfg, "vlan-limit", "0");
             }
+            /* Clear flow-restore-wait. OVN at one point would set
+             * flow-restore-wait in order to try to synchronize with
+             * OVS. However, that resulted in a bug, so that behavior
+             * was reverted. If upgrading from a version where OVN
+             * manipulted flow-restore-wait, then flow-restore-wait
+             * needs to be cleared in order for OVS to function
+             * properly. This is (hopefully) a temporary measure until
+             * a more reliable method of synchronizing with OVS is
+             * devised.
+             */
+            if (smap_get_bool(&cfg->external_ids,
+                              "ovn-managed-flow-restore-wait", false) &&
+                smap_get(&cfg->other_config, "flow-restore-wait")) {
+                ovsrec_open_vswitch_update_other_config_delkey(
+                    cfg, "flow-restore-wait");
+                ovsrec_open_vswitch_update_external_ids_delkey(
+                   cfg, "ovn-managed-flow-restore-wait");
+            }
         }
 
         static bool chassis_idx_stored = false;
@@ -5945,7 +5999,8 @@ main(int argc, char *argv[])
                                       sbrec_chassis_private_by_name,
                                       ovs_table, chassis_id,
                                       br_int, &transport_zones,
-                                      &chassis_private);
+                                      &chassis_private,
+                                      sbrec_encaps_index_by_ip_and_type);
             }
 
             /* If any OVS feature support changed, force a full recompute.
@@ -5981,11 +6036,13 @@ main(int argc, char *argv[])
                     engine_set_force_recompute();
                 }
 
-                if (chassis && ovs_feature_set_discovered()) {
-                    encaps_run(ovs_idl_txn, br_int,
+                const struct sbrec_sb_global *sbg =
+                    sbrec_sb_global_first(ovnsb_idl_loop.idl);
+                if (chassis && sbg && ovs_feature_set_discovered()) {
+                    encaps_run(ovs_idl_txn, ovnsb_idl_txn, br_int,
                                sbrec_chassis_table_get(ovnsb_idl_loop.idl),
                                chassis,
-                               sbrec_sb_global_first(ovnsb_idl_loop.idl),
+                               sbg,
                                ovs_table,
                                &transport_zones,
                                bridge_table);
@@ -6110,7 +6167,8 @@ main(int argc, char *argv[])
                                     &runtime_data->local_active_ports_ras,
                                     ovsrec_open_vswitch_table_get(
                                             ovs_idl_loop.idl),
-                                    ovnsb_idl_loop.cur_cfg);
+                                    ovnsb_idl_loop.cur_cfg,
+                                    if_mgr);
                         stopwatch_stop(PINCTRL_RUN_STOPWATCH_NAME,
                                        time_msec());
                         mirror_run(ovs_idl_txn,
@@ -6143,7 +6201,7 @@ main(int argc, char *argv[])
                     if (mac_cache_data) {
                         statctrl_update(br_int->name);
                         statctrl_run(ovnsb_idl_txn, sbrec_port_binding_by_name,
-                                     mac_cache_data);
+                                     chassis, mac_cache_data);
                     }
 
                     ofctrl_seqno_update_create(
@@ -6290,16 +6348,12 @@ main(int argc, char *argv[])
             poll_immediate_wake();
         }
 
-        int ovnsb_txn_status = ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop);
+        ovnsb_txn_status = ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop);
         if (!ovnsb_txn_status) {
             VLOG_INFO("OVNSB commit failed, force recompute next time.");
             engine_set_force_recompute_immediate();
         } else if (ovnsb_txn_status == 1) {
-            if (ovnsb_idl_loop.next_cfg == INT64_MAX) {
-                ovnsb_idl_loop.next_cfg = 0;
-            } else {
-                ovnsb_idl_loop.next_cfg++;
-            }
+            ovsdb_idl_loop_next_cfg_inc(&ovnsb_idl_loop);
         } else if (ovnsb_txn_status == -1) {
             /* The commit is still in progress */
         } else {
@@ -6352,9 +6406,6 @@ loop_done:
             exit_args.exiting = true;
         }
     }
-
-    engine_set_context(NULL);
-    engine_cleanup();
 
     /* It's time to exit.  Clean up the databases if we are not restarting */
     if (exit_args.restart) {
@@ -6415,15 +6466,21 @@ loop_done:
         VLOG_INFO("Southbound and OVS database cleanup complete.");
     }
 
+    /* The engine cleanup should happen only after threads have been
+     * destroyed and joined in case they are accessing engine data. */
+    pinctrl_destroy();
+    statctrl_destroy();
+
+    engine_set_context(NULL);
+    engine_cleanup();
+
     free(ovn_version);
     lflow_destroy();
     ofctrl_destroy();
-    pinctrl_destroy();
     binding_destroy();
     patch_destroy();
     mirror_destroy();
     encaps_destroy();
-    statctrl_destroy();
     if_status_mgr_destroy(if_mgr);
     shash_destroy(&vif_plug_deleted_iface_ids);
     shash_destroy(&vif_plug_changed_iface_ids);

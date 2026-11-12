@@ -20,6 +20,18 @@ DOCKER_REPOSITORY="quay.io/platform9/pf9-ovn"
 ECR_PUBLIC_REPOSITORY="public.ecr.aws/platform9/pf9-ovn"
 
 cp -r "$TEAMCITY_ROOT/pkgs/" "$ROOT/container"
+# Debug symbols for the image (PCD-10646): only the packages container/Dockerfile
+# installs, from this build's debug/ (build-common.sh). The folder must exist even when
+# empty (PF9_DEBUG_SYMBOLS=false), because the Dockerfile bind-mounts it.
+rm -rf "$ROOT/container/debug"
+mkdir -p "$ROOT/container/debug/u24-dbgsym"
+for p in ovn-central ovn-common openvswitch-common; do
+  if ls "$TEAMCITY_ROOT"/debug/u24-dbgsym/${p}-dbgsym_*.ddeb >/dev/null 2>&1; then
+    cp "$TEAMCITY_ROOT"/debug/u24-dbgsym/${p}-dbgsym_*.ddeb "$ROOT/container/debug/u24-dbgsym/"
+  else
+    echo "WARNING: no ${p}-dbgsym in debug/u24-dbgsym; the image will lack its symbols"
+  fi
+done
 # Build using Quay tag
 docker build --no-cache \
   -t "$DOCKER_REPOSITORY:$TAG" \

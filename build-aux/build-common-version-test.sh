@@ -24,6 +24,8 @@ run_patch() {
         PF9_OVN_VERSION="$pf9_ovn_version"
         PF9_VERSION="2026.9.0"
         BUILD_NUMBER="42"
+        TEAMCITY_BUILD_ID="7654321"
+        pf9_set_build_id
         pf9_patch_ovn_binary_version
     )
 }
@@ -62,3 +64,121 @@ if run_patch "2026.9.0" > "$WORKDIR/out.txt" 2>&1; then
     exit 1
 fi
 echo "PASS: a PF9_OVN_VERSION missing its -v<version> suffix is also caught."
+
+# --- Part 4: the northd version match is unaffected by the package version scheme ---
+# check_northd_version() strips ".pf9" up to the next "-" (ovn_version_base() in
+# controller/ovn-controller.c, PCD-8825 / 4fa1ef430) so controller and northd built
+# with different PF9 versions / build ids still match. That only works if the binary
+# version baked into configure.ac still has ".pf9." in it - even though the package
+# version (epoch 2, no "pf9") does not - and uses the TeamCity build id, not the number.
+if ! run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
+    cat "$WORKDIR/out.txt" >&2; exit 1
+fi
+binver=$(cat "$ROOT/configure.ac")
+if [ "$binver" != "24.03.6.pf9.2026.9.0.7654321" ]; then
+    echo "FAIL: binary version is '$binver', expected 24.03.6.pf9.2026.9.0.7654321" \
+         "(must keep .pf9. for ovn_version_base() and use the build id, not BUILD_NUMBER=42)." >&2
+    exit 1
+fi
+# Same transformation as ovn_version_base(), applied to an internal version string
+# "<binary version>-<ovs lib version>-<db schema>".
+strip_pf9() { printf '%s\n' "$1" | sed 's/\.pf9[^-]*//'; }
+a=$(strip_pf9 "${binver}-20.33.0-76.8")
+b=$(strip_pf9 "24.03.6.pf9.2026.4.0.385-20.33.0-76.8")   # older controller, build number
+c=$(strip_pf9 "24.03.6-20.33.0-76.8")                    # northd without a pf9 marker
+if [ "$a" != "24.03.6-20.33.0-76.8" ] || [ "$a" != "$b" ] || [ "$a" != "$c" ]; then
+    echo "FAIL: controller/northd versions no longer reduce to the same base: '$a' '$b' '$c'" >&2
+    exit 1
+fi
+echo "PASS: binary version keeps .pf9. and reduces to the same northd match base."
+
+# --- Part 5: build id is mandatory and numeric ---
+for bad in "" "abc" "12 3"; do
+    if ( cd "$WORKDIR"; ROOT="$ROOT"; . "$BUILD_COMMON"; TEAMCITY_BUILD_ID="$bad"; pf9_set_build_id ) > "$WORKDIR/out.txt" 2>&1; then
+        echo "FAIL: pf9_set_build_id accepted TEAMCITY_BUILD_ID='$bad'" >&2
+        exit 1
+    fi
+done
+echo "PASS: a missing or non-numeric TEAMCITY_BUILD_ID fails the build."
+
+# --- Part 6: package versions sort above the old schemes and order by build id ---
+if command -v dpkg >/dev/null 2>&1; then
+    dpkg --compare-versions "2:24.03.6-2026.9.0-100-u22" gt "1:24.03.6-pf9-2026.9.0-999999+u22" \
+        && dpkg --compare-versions "2:3.3.6-2026.9.0-100-u22" gt "1:3.3.6-pf9+u22" \
+        && dpkg --compare-versions "2:24.03.6-2026.9.0-101-u22" gt "2:24.03.6-2026.9.0-100-u22" \
+        && dpkg --compare-versions "2:24.03.6-2026.9.0-100-u24" gt "2:24.03.6-2026.9.0-100-u22" \
+        && dpkg --compare-versions "2:24.03.6-2026.9.0-100-u22" ge "2:24.03.6-2026.9.0-100" \
+        && dpkg --compare-versions "2:24.03.6-2026.9.0-1000-u22" gt "2:24.03.6-2026.9.0-999-u22" \
+        || { echo "FAIL: deb version ordering is wrong" >&2; exit 1; }
+    echo "PASS: deb versions order above the old schemes and by build id."
+else
+    echo "SKIP: dpkg not available, deb version ordering not checked."
+fi
+
+# --- Part 7: the source commit stamp (Pf9-Source-Sha / pf9-source-sha) ---
+SHA="0123456789abcdef0123456789abcdef01234567"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+run_common() ( cd "$WORKDIR" && ROOT="$ROOT" && . "$BUILD_COMMON" && "$@" )
+
+# 7a. deb: the override is appended once, with the sha, and refuses a second stamp.
+printf '%%:\n\tdh $@\n' > "$WORKDIR/rules"
+run_common pf9_stamp_deb_rules "$WORKDIR/rules" "$SHA"
+grep -qxF "	dh_gencontrol -- -DPf9-Source-Sha=$SHA" "$WORKDIR/rules" \
+    && grep -qx 'override_dh_gencontrol:' "$WORKDIR/rules" \
+    || { echo "FAIL: pf9_stamp_deb_rules did not write the override" >&2; exit 1; }
+if run_common pf9_stamp_deb_rules "$WORKDIR/rules" "$SHA" >/dev/null 2>&1; then
+    echo "FAIL: pf9_stamp_deb_rules stamped a rules file that already overrides dh_gencontrol" >&2
+    exit 1
+fi
+echo "PASS: pf9_stamp_deb_rules appends the dh_gencontrol override once."
+
+# 7b. rpm: one Provides per package, on a fixture and on this repo's own OVN spec.
+printf 'Name: x\nSummary: main\n%%package a\nSummary: a\n%%package b\nSummary: b\n' > "$WORKDIR/x.spec"
+run_common pf9_stamp_rpm_spec "$WORKDIR/x.spec" "$SHA"
+[ "$(grep -c "^Provides: pf9-source-sha($SHA)\$" "$WORKDIR/x.spec")" = 3 ] \
+    || { echo "FAIL: pf9_stamp_rpm_spec did not stamp every package of the fixture" >&2; exit 1; }
+cp "$REPO_ROOT/rhel/ovn-fedora.spec.in" "$WORKDIR/ovn.spec"
+run_common pf9_stamp_rpm_spec "$WORKDIR/ovn.spec" "$SHA"
+[ "$(grep -c '^Summary:' "$WORKDIR/ovn.spec")" = "$(grep -c "^Provides: pf9-source-sha($SHA)\$" "$WORKDIR/ovn.spec")" ] \
+    || { echo "FAIL: not every package of rhel/ovn-fedora.spec.in is stamped" >&2; exit 1; }
+printf 'Name: nosummary\n' > "$WORKDIR/none.spec"
+if run_common pf9_stamp_rpm_spec "$WORKDIR/none.spec" "$SHA" >/dev/null 2>&1; then
+    echo "FAIL: pf9_stamp_rpm_spec accepted a spec without any package" >&2
+    exit 1
+fi
+echo "PASS: pf9_stamp_rpm_spec stamps every package, including this repo's OVN spec."
+
+# 7c. OVN's own debian/rules stamps from PF9_OVN_SHA and omits the field when it is unset.
+grep -q '^override_dh_gencontrol:' "$REPO_ROOT/debian/rules" \
+    && grep -q 'dh_gencontrol -- -DPf9-Source-Sha=$(strip $(PF9_OVN_SHA))' "$REPO_ROOT/debian/rules" \
+    || { echo "FAIL: debian/rules does not stamp Pf9-Source-Sha from PF9_OVN_SHA" >&2; exit 1; }
+echo "PASS: debian/rules stamps Pf9-Source-Sha from PF9_OVN_SHA."
+
+# 7d. The verify helpers fail on a missing or wrong stamp. dpkg-deb and rpm are stubbed
+# so this runs anywhere; each stub answers from the file named after its argument.
+STUBS="$WORKDIR/stubs"
+mkdir -p "$STUBS"
+printf '#!/bin/sh\n# dpkg-deb -f <deb> Pf9-Source-Sha\ncat "$2.sha" 2>/dev/null\n' > "$STUBS/dpkg-deb"
+printf '#!/bin/sh\n# rpm -qp --provides <rpm>\ncat "$3.provides" 2>/dev/null\n' > "$STUBS/rpm"
+chmod +x "$STUBS/dpkg-deb" "$STUBS/rpm"
+printf '%s\n' "$SHA" > "$WORKDIR/ok.deb.sha"
+printf '%s\n' "other" > "$WORKDIR/bad.deb.sha"
+printf 'pf9-source-sha(%s)\nopenvswitch\n' "$SHA" > "$WORKDIR/ok.rpm.provides"
+printf 'pf9-source-sha(other)\n' > "$WORKDIR/bad.rpm.provides"
+: > "$WORKDIR/none.rpm.provides"
+verify() ( export PATH="$STUBS:$PATH"; run_common "$@" )
+verify pf9_verify_deb_stamp "$SHA" "$WORKDIR/ok.deb" \
+    && verify pf9_verify_rpm_stamp "$SHA" "$WORKDIR/ok.rpm" \
+    || { echo "FAIL: the verify helpers rejected a correctly stamped package" >&2; exit 1; }
+for case in "pf9_verify_deb_stamp $SHA $WORKDIR/bad.deb" \
+            "pf9_verify_deb_stamp $SHA $WORKDIR/missing.deb" \
+            "pf9_verify_deb_stamp $SHA $WORKDIR/ok.deb $WORKDIR/bad.deb" \
+            "pf9_verify_rpm_stamp $SHA $WORKDIR/bad.rpm" \
+            "pf9_verify_rpm_stamp $SHA $WORKDIR/none.rpm"; do
+    # shellcheck disable=SC2086
+    if verify $case >/dev/null 2>&1; then
+        echo "FAIL: the verify helpers accepted: $case" >&2
+        exit 1
+    fi
+done
+echo "PASS: the verify helpers fail on a wrong, missing or partly wrong stamp."

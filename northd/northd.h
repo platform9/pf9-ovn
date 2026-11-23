@@ -303,6 +303,9 @@ struct ovn_datapath {
     struct hmap port_tnlids;
     uint32_t port_key_hint;
 
+    bool port_key_conflict; /* True if a port's requested-tnl-key could
+                              * not be assigned due to a conflict. */
+
     bool has_unknown;
     bool has_vtep_lports;
     bool has_arp_proxy_port;
@@ -565,8 +568,8 @@ struct ovn_port {
                                           * beginning of 'lsp_addrs' extracted
                                           * directly from LSP 'addresses'. */
 
-    struct lport_addresses *ps_addrs;   /* Port security addresses. */
-    unsigned int n_ps_addrs;
+    /* LSP has at least one valid MAC address in the port security column. */
+    bool lsp_has_port_sec;
 
     bool lsp_can_be_inc_processed; /* If it can be incrementally processed when
                                       the port changes. */

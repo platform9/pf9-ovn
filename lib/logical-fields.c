@@ -257,8 +257,12 @@ ovn_init_symtab(struct shash *symtab)
 
     /* Predefined IPv6 multicast groups (RFC 4291, 2.7.1). */
     expr_symtab_add_predicate(symtab, "ip6.mcast_rsvd",
-                              "ip6.dst[116..127] == 0xff0 && "
-                              "ip6.dst[0..111] == 0x0");
+                              "ip6.dst == { "
+                                  "ff00::0, ff01::0, ff02::0, ff03::0, "
+                                  "ff04::0, ff05::0, ff06::0, ff07::0, "
+                                  "ff08::0, ff09::0, ff0a::0, ff0b::0, "
+                                  "ff0c::0, ff0d::0, ff0e::0, ff0f::0 "
+                               "}");
     expr_symtab_add_predicate(symtab, "ip6.mcast_all_nodes",
                               "ip6.dst == ff01::1 || ip6.dst == ff02::1");
     expr_symtab_add_predicate(symtab, "ip6.mcast_all_rtrs",
@@ -404,4 +408,71 @@ ovn_field_from_name(const char *name)
     ovn_init_ovnfields();
 
     return shash_find_data(&ovnfield_by_name, name);
+}
+
+/* Removes the symbol with 'name' from 'symtab', freeing its memory. */
+static void
+expr_symtab_remove(struct shash *symtab, const char *name)
+{
+    struct expr_symbol *symbol = shash_find_and_delete(symtab, name);
+    if (symbol) {
+        free(symbol->name);
+        free(symbol->prereqs);
+        free(symbol->predicate);
+        free(symbol);
+    }
+}
+
+/* Initialize a symbol table for ACL CT translation.
+ * This creates an alternative symbol table that maps L4 port fields
+ * (tcp/udp/sctp) to their connection tracking equivalents. This allows
+ * matching on all IP fragments (not just the first) by using CT state
+ * which is available for all fragments. */
+void
+ovn_init_acl_ct_symtab(struct shash *acl_symtab)
+{
+    /* Initialize with the standard symbol table. */
+    ovn_init_symtab(acl_symtab);
+
+    /* Remove the original tcp/udp/sctp symbols that we will override. */
+    expr_symtab_remove(acl_symtab, "tcp.src");
+    expr_symtab_remove(acl_symtab, "tcp.dst");
+    expr_symtab_remove(acl_symtab, "tcp");
+    expr_symtab_remove(acl_symtab, "udp.src");
+    expr_symtab_remove(acl_symtab, "udp.dst");
+    expr_symtab_remove(acl_symtab, "udp");
+    expr_symtab_remove(acl_symtab, "sctp.src");
+    expr_symtab_remove(acl_symtab, "sctp.dst");
+    expr_symtab_remove(acl_symtab, "sctp");
+
+    /* Add ct_proto field - CT original direction protocol. Used in the
+     * tcp/udp/sctp predicate expansions below. */
+    expr_symtab_add_field(acl_symtab, "ct_proto", MFF_CT_NW_PROTO,
+                          "ct.trk", false);
+
+    /* Override TCP protocol and port fields to use CT equivalents.
+     * When "tcp" is used as a predicate, it expands to "ct_proto == 6"
+     * instead of "ip.proto == 6". */
+    expr_symtab_add_predicate(acl_symtab, "tcp",
+                              "ct.trk && !ct.inv && ct_proto == 6");
+    expr_symtab_add_field(acl_symtab, "tcp.src", MFF_CT_TP_SRC,
+                          "tcp", false);
+    expr_symtab_add_field(acl_symtab, "tcp.dst", MFF_CT_TP_DST,
+                          "tcp", false);
+
+    /* Override UDP protocol and port fields */
+    expr_symtab_add_predicate(acl_symtab, "udp",
+                              "ct.trk && !ct.inv && ct_proto == 17");
+    expr_symtab_add_field(acl_symtab, "udp.src", MFF_CT_TP_SRC,
+                          "udp", false);
+    expr_symtab_add_field(acl_symtab, "udp.dst", MFF_CT_TP_DST,
+                          "udp", false);
+
+    /* Override SCTP protocol and port fields */
+    expr_symtab_add_predicate(acl_symtab, "sctp",
+                              "ct.trk && !ct.inv && ct_proto == 132");
+    expr_symtab_add_field(acl_symtab, "sctp.src", MFF_CT_TP_SRC,
+                          "sctp", false);
+    expr_symtab_add_field(acl_symtab, "sctp.dst", MFF_CT_TP_DST,
+                          "sctp", false);
 }

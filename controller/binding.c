@@ -49,7 +49,7 @@ VLOG_DEFINE_THIS_MODULE(binding);
 
 #define OVN_QOS_TYPE "linux-htb"
 
-#define CLAIM_TIME_THRESHOLD_MS 500
+#define CLAIM_TIME_THRESHOLD_MS 2000
 
 struct claimed_port {
     long long int last_claimed;
@@ -191,6 +191,20 @@ destroy_qos_map(struct hmap *qos_map)
     hmap_destroy(qos_map);
 }
 
+static bool
+is_qos_iface(const struct ovsrec_interface *iface)
+{
+    if (smap_get_bool(&iface->external_ids, "ovn-egress-iface", false)) {
+        return true;
+    }
+
+    if (!iface->type[0] || !strcmp(iface->type, "system")) {
+        return true;
+    }
+
+    return false;
+}
+
 static const struct ovsrec_interface *
 get_qos_egress_port_interface(struct shash *bridge_mappings,
                               const struct ovsrec_port **pport,
@@ -211,9 +225,7 @@ get_qos_egress_port_interface(struct shash *bridge_mappings,
                 continue;
             }
 
-            if (smap_get_bool(&iface->external_ids,
-                              "ovn-egress-iface", false) ||
-                !strcmp(iface->type, "")) {
+            if (is_qos_iface(iface)) {
                 *pport = port;
                 return iface;
             }
@@ -284,18 +296,17 @@ add_ovs_qos_table_entry(struct ovsdb_idl_txn *ovs_idl_txn,
         smap_clear(&external_ids);
     }
 
-    struct ovsrec_queue *queue;
-    size_t i;
-    for (i = 0; i < qos->n_queues; i++) {
-        queue = qos->value_queues[i];
-
-        const char *p = smap_get(&queue->external_ids, "ovn_port");
+    struct ovsrec_queue *queue = NULL;
+    for (size_t i = 0; i < qos->n_queues; i++) {
+        const char *p =
+            smap_get(&qos->value_queues[i]->external_ids, "ovn_port");
         if (p && !strcmp(p, ovn_port)) {
+            queue = qos->value_queues[i];
             break;
         }
     }
 
-    if (i == qos->n_queues) {
+    if (!queue) {
         queue = ovsrec_queue_insert(ovs_idl_txn);
         ovsrec_qos_update_queues_setkey(qos, queue_id, queue);
     }
@@ -768,6 +779,16 @@ update_active_pb_ras_pd(const struct sbrec_port_binding *pb,
     } else if (ras_pd_conf && !iter) {
         shash_add(map, pb->logical_port, pb);
     }
+}
+
+/* Check the patch port needs CT zone based on enable_router_port_acl.
+ * Returns true if the patch port should be added to local_lports for
+ * CT zone allocation.
+ */
+static bool
+patch_port_needs_ct_zone(const struct sbrec_port_binding *pb)
+{
+    return smap_get_bool(&pb->options, "enable_router_port_acl", false);
 }
 
 static struct local_binding *local_binding_create(
@@ -1301,16 +1322,30 @@ remove_additional_chassis(const struct sbrec_port_binding *pb,
 }
 
 bool
-lport_maybe_postpone(const char *port_name, long long int now,
+lport_maybe_postpone(const struct sbrec_port_binding *pb,
+                     const struct sbrec_chassis *chassis_rec,
+                     long long int now,
                      struct sset *postponed_ports)
 {
-    long long int last_claimed = get_claim_timestamp(port_name);
+    if (pb->ha_chassis_group) {
+        struct ha_chassis_ordered *ordered_ha_ch =
+            get_ordered_ha_chassis_list(pb->ha_chassis_group, NULL,
+                                        chassis_rec);
+        if (ordered_ha_ch &&
+            ordered_ha_ch->ha_ch[0].chassis == chassis_rec) {
+            ha_chassis_destroy_ordered(ordered_ha_ch);
+            return false;
+        } else {
+            ha_chassis_destroy_ordered(ordered_ha_ch);
+        }
+    }
+    long long int last_claimed = get_claim_timestamp(pb->logical_port);
     if (now - last_claimed >= CLAIM_TIME_THRESHOLD_MS) {
         return false;
     }
 
-    sset_add(postponed_ports, port_name);
-    VLOG_DBG("Postponed claim on logical port %s.", port_name);
+    sset_add(postponed_ports, pb->logical_port);
+    VLOG_DBG("Postponed claim on logical port %s.", pb->logical_port);
 
     return true;
 }
@@ -1335,7 +1370,7 @@ claim_lport(const struct sbrec_port_binding *pb,
         if (pb->chassis != chassis_rec) {
             long long int now = time_msec();
             if (pb->chassis) {
-                if (lport_maybe_postpone(pb->logical_port, now,
+                if (lport_maybe_postpone(pb, chassis_rec, now,
                                          postponed_ports)) {
                     return true;
                 }
@@ -2083,6 +2118,11 @@ binding_run(struct binding_ctx_in *b_ctx_in, struct binding_ctx_out *b_ctx_out)
         switch (lport_type) {
         case LP_PATCH:
             update_related_lport(pb, b_ctx_out);
+            /* Check if this patch port needs CT zone allocation and add it
+             * to local_lports if required. */
+            if (patch_port_needs_ct_zone(pb)) {
+                update_local_lports(pb->logical_port, b_ctx_out);
+            }
             break;
         case LP_VTEP:
             update_related_lport(pb, b_ctx_out);
@@ -2949,6 +2989,20 @@ handle_updated_port(struct binding_ctx_in *b_ctx_in,
     case LP_PATCH:
         update_related_lport(pb, b_ctx_out);
         consider_patch_port_for_local_datapaths(pb, b_ctx_in, b_ctx_out);
+        /* Handle dynamic changes to enable_router_port_acl option.
+         * Check CT zone requirement if options updated. */
+        if (sbrec_port_binding_is_updated(pb,
+                                          SBREC_PORT_BINDING_COL_OPTIONS)) {
+            tracked_datapath_lport_add(pb, TRACKED_RESOURCE_UPDATED,
+                b_ctx_out->tracked_dp_bindings);
+            if (patch_port_needs_ct_zone(pb)) {
+                update_local_lports(pb->logical_port, b_ctx_out);
+            } else {
+                /* Option was removed, remove from local_lports to
+                 * release CT zone */
+                remove_local_lports(pb->logical_port, b_ctx_out);
+            }
+        }
         break;
 
     case LP_VTEP:

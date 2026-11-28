@@ -5,6 +5,24 @@ ovn (__PF9_OVN_BUILD_VERSION__) unstable; urgency=medium
 
  -- Platform9 Systems <info@platform9.com>  Tue, 16 Dec 2025 22:00:00 -0800
 
+ovn (24.03.9-1) unstable; urgency=low
+   [ OVN team ]
+   * New upstream version
+
+ -- OVN team <dev@openvswitch.org>  Tue, 16 Jun 2026 12:11:28 -0400
+
+ovn (24.03.8-1) unstable; urgency=low
+   [ OVN team ]
+   * New upstream version
+
+ -- OVN team <dev@openvswitch.org>  Mon, 20 Apr 2026 05:52:08 -0400
+
+ovn (24.03.7-1) unstable; urgency=low
+   [ OVN team ]
+   * New upstream version
+
+ -- OVN team <dev@openvswitch.org>  Tue, 18 Nov 2025 12:41:38 -0500
+
 ovn (24.03.6-1) unstable; urgency=low
    [ OVN team ]
    * New upstream version

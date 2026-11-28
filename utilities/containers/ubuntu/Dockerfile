@@ -11,6 +11,7 @@ RUN apt update -y \
         automake \
         bc \
         clang \
+        curl \
         ethtool \
         gcc \
         git \
@@ -18,6 +19,7 @@ RUN apt update -y \
         iproute2 \
         iputils-arping \
         iputils-ping \
+        isc-dhcp-client \
         isc-dhcp-server \
         kmod \
         libelf-dev \

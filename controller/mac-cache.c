@@ -318,6 +318,7 @@ fdb_add(struct hmap *map, struct fdb_data fdb_data) {
     }
 
     fdb->data = fdb_data;
+    fdb->cfg = -1;
 
     return fdb;
 }
@@ -402,6 +403,10 @@ void
 mac_binding_stats_process_flow_stats(struct ovs_list *stats_list,
                                      struct ofputil_flow_stats *ofp_stats)
 {
+    if (ofp_stats->idle_age == ofp_stats->duration_sec) {
+        return;
+    }
+
     struct mac_cache_stats *stats = xmalloc(sizeof *stats);
 
     stats->idle_age_ms = ofp_stats->idle_age * 1000;
@@ -451,10 +456,8 @@ mac_binding_update_log(const char *action,
 }
 
 void
-mac_binding_stats_run(
-        struct rconn *swconn OVS_UNUSED,
-        struct ovsdb_idl_index *sbrec_port_binding_by_name OVS_UNUSED,
-        struct ovs_list *stats_list, uint64_t *req_delay, void *data)
+mac_binding_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+                      void *data)
 {
     struct mac_cache_data *cache_data = data;
     long long timewall_now = time_wall_msec();
@@ -499,7 +502,7 @@ mac_binding_stats_run(
 
     mac_cache_update_req_delay(&cache_data->thresholds, req_delay);
     if (*req_delay) {
-        VLOG_DBG("MAC binding statistics dalay: %"PRIu64, *req_delay);
+        VLOG_DBG("MAC binding statistics delay: %"PRIu64, *req_delay);
     }
 }
 
@@ -508,6 +511,10 @@ void
 fdb_stats_process_flow_stats(struct ovs_list *stats_list,
                              struct ofputil_flow_stats *ofp_stats)
 {
+    if (ofp_stats->idle_age == ofp_stats->duration_sec) {
+        return;
+    }
+
     struct mac_cache_stats *stats = xmalloc(sizeof *stats);
 
     stats->idle_age_ms = ofp_stats->idle_age * 1000;
@@ -549,10 +556,7 @@ fdb_update_log(const char *action,
 }
 
 void
-fdb_stats_run(struct rconn *swconn OVS_UNUSED,
-              struct ovsdb_idl_index *sbrec_port_binding_by_name OVS_UNUSED,
-              struct ovs_list *stats_list,
-              uint64_t *req_delay, void *data)
+fdb_stats_run(struct ovs_list *stats_list, uint64_t *req_delay, void *data)
 {
     struct mac_cache_data *cache_data = data;
     long long timewall_now = time_wall_msec();
@@ -597,7 +601,7 @@ fdb_stats_run(struct rconn *swconn OVS_UNUSED,
 
     mac_cache_update_req_delay(&cache_data->thresholds, req_delay);
     if (*req_delay) {
-        VLOG_DBG("FDB entry statistics dalay: %"PRIu64, *req_delay);
+        VLOG_DBG("FDB entry statistics delay: %"PRIu64, *req_delay);
     }
 }
 
@@ -931,14 +935,12 @@ mac_binding_probe_stats_process_flow_stats(
 }
 
 void
-mac_binding_probe_stats_run(
-        struct rconn *swconn,
-        struct ovsdb_idl_index *sbrec_port_binding_by_name,
-        struct ovs_list *stats_list,
-        uint64_t *req_delay, void *data)
+mac_binding_probe_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+                            void *data)
 {
     long long timewall_now = time_wall_msec();
-    struct mac_cache_data *cache_data = data;
+    struct mac_binding_probe_data *probe_data = data;
+    struct mac_cache_data *cache_data = probe_data->cache_data;
 
     struct mac_cache_stats *stats;
     LIST_FOR_EACH_POP (stats, list_node, stats_list) {
@@ -974,9 +976,18 @@ mac_binding_probe_stats_run(
         }
 
         const struct sbrec_port_binding *pb =
-            lport_lookup_by_name(sbrec_port_binding_by_name,
+            lport_lookup_by_name(probe_data->sbrec_port_binding_by_name,
                                  sbrec->logical_port);
         if (!pb) {
+            free(stats);
+            continue;
+        }
+
+        if (!lport_pb_is_local(probe_data->sbrec_port_binding_by_name,
+                               probe_data->chassis, pb)) {
+            mac_binding_update_log("Not sending ARP/ND request for non-local",
+                                   &mb->data, true, threshold,
+                                   stats->idle_age_ms, since_updated_ms);
             free(stats);
             continue;
         }
@@ -987,18 +998,34 @@ mac_binding_probe_stats_run(
             continue;
         }
 
-        bool is_mb_v4 = IN6_IS_ADDR_V4MAPPED(&mb->data.ip);
-        if ((is_mb_v4 && laddr.n_ipv4_addrs)
-                || (!is_mb_v4 && laddr.n_ipv6_addrs)) {
-            struct in6_addr local =
-                is_mb_v4 ? in6_addr_mapped_ipv4(laddr.ipv4_addrs[0].addr)
-                         : laddr.ipv6_addrs[0].addr;
+        struct in6_addr local = in6addr_any;
+        if (IN6_IS_ADDR_V4MAPPED(&mb->data.ip)) {
+            ovs_be32 ip4 = in6_addr_get_mapped_ipv4(&mb->data.ip);
+            for (size_t i = 0; i < laddr.n_ipv4_addrs; i++) {
+                struct ipv4_netaddr address = laddr.ipv4_addrs[i];
+                if (address.network == (ip4 & address.mask)) {
+                    local = in6_addr_mapped_ipv4(address.addr);
+                    break;
+                }
+            }
+        } else {
+            for (size_t i = 0; i < laddr.n_ipv6_addrs; i++) {
+                struct ipv6_netaddr address = laddr.ipv6_addrs[i];
+                struct in6_addr neigh_prefix =
+                    ipv6_addr_bitand(&mb->data.ip, &address.mask);
+                if (ipv6_addr_equals(&address.network, &neigh_prefix)) {
+                    local = address.addr;
+                    break;
+                }
+            }
+        }
 
+        if (!ipv6_addr_equals(&local, &in6addr_any)) {
             mac_binding_update_log("Sending ARP/ND request for active",
                                    &mb->data, true, threshold,
                                    stats->idle_age_ms, since_updated_ms);
 
-            send_self_originated_neigh_packet(swconn,
+            send_self_originated_neigh_packet(probe_data->swconn,
                                               sbrec->datapath->tunnel_key,
                                               pb->tunnel_key, laddr.ea,
                                               &local, &mb->data.ip,

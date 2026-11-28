@@ -794,6 +794,15 @@ run_memory_trimmer(struct ovsdb_idl *ovnnb_idl, bool activity)
     memory_trimmer_wait(mt);
 }
 
+static bool
+sb_cfg_is_in_sync(struct ovsdb_idl *ovnnb_idl,
+                  struct ovsdb_idl_loop *sb_loop)
+{
+    const struct nbrec_nb_global *nb = nbrec_nb_global_first(ovnnb_idl);
+
+    return !(nb && sb_loop->cur_cfg && nb->sb_cfg != sb_loop->cur_cfg);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -861,6 +870,41 @@ main(int argc, char *argv[])
     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl, &nbrec_nb_global_col_hv_cfg);
     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
                          &nbrec_nb_global_col_hv_cfg_timestamp);
+    ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
+                         &nbrec_logical_router_port_col_status);
+
+    /* Ignore northbound external IDs, except for logical switch, router and
+     * their ports, for which the external IDs are propagated to corresponding
+     * southbound datapath and port binding records. */
+    const struct ovsdb_idl_column *external_ids[] = {
+        &nbrec_acl_col_external_ids,
+        &nbrec_address_set_col_external_ids,
+        &nbrec_bfd_col_external_ids,
+        &nbrec_chassis_template_var_col_external_ids,
+        &nbrec_connection_col_external_ids,
+        &nbrec_copp_col_external_ids,
+        &nbrec_dhcp_options_col_external_ids,
+        &nbrec_dns_col_external_ids,
+        &nbrec_forwarding_group_col_external_ids,
+        &nbrec_gateway_chassis_col_external_ids,
+        &nbrec_ha_chassis_col_external_ids,
+        &nbrec_ha_chassis_group_col_external_ids,
+        &nbrec_load_balancer_col_external_ids,
+        &nbrec_load_balancer_health_check_col_external_ids,
+        &nbrec_logical_router_policy_col_external_ids,
+        &nbrec_logical_router_static_route_col_external_ids,
+        &nbrec_meter_col_external_ids,
+        &nbrec_meter_band_col_external_ids,
+        &nbrec_mirror_col_external_ids,
+        &nbrec_nat_col_external_ids,
+        &nbrec_nb_global_col_external_ids,
+        &nbrec_port_group_col_external_ids,
+        &nbrec_qos_col_external_ids,
+        &nbrec_ssl_col_external_ids,
+    };
+    for (size_t i = 0; i < ARRAY_SIZE(external_ids); i++) {
+        ovsdb_idl_omit(ovnnb_idl_loop.idl, external_ids[i]);
+    }
 
     unixctl_command_register("nb-connection-status", "", 0, 0,
                              ovn_conn_show, ovnnb_idl_loop.idl);
@@ -901,6 +945,13 @@ main(int argc, char *argv[])
     for (size_t i = 0; i < SBREC_LOGICAL_DP_GROUP_N_COLUMNS; i++) {
         ovsdb_idl_omit_alert(ovnsb_idl_loop.idl,
                              &sbrec_logical_dp_group_columns[i]);
+    }
+    for (size_t i = 0; i < SBREC_STATIC_MAC_BINDING_N_COLUMNS; i++) {
+        ovsdb_idl_omit_alert(ovnsb_idl_loop.idl,
+                             &sbrec_static_mac_binding_columns[i]);
+    }
+    for (size_t i = 0; i < SBREC_DNS_N_COLUMNS; i++) {
+        ovsdb_idl_omit_alert(ovnsb_idl_loop.idl, &sbrec_dns_columns[i]);
     }
 
     unixctl_command_register("sb-connection-status", "", 0, 0,
@@ -1009,8 +1060,17 @@ main(int argc, char *argv[])
                 if (ovnnb_txn && ovnsb_txn &&
                     inc_proc_northd_can_run(&eng_ctx)) {
                     int64_t loop_start_time = time_wall_msec();
-                    activity = inc_proc_northd_run(ovnnb_txn, ovnsb_txn,
-                                                   &eng_ctx);
+
+                    if (sb_cfg_is_in_sync(ovnnb_idl_loop.idl,
+                                          &ovnsb_idl_loop)) {
+                        activity = inc_proc_northd_run(ovnnb_txn,
+                                                       ovnsb_txn,
+                                                       &eng_ctx);
+                    } else {
+                        poll_immediate_wake();
+                        clear_idl_track = false;
+                    }
+
                     check_and_add_supported_dhcp_opts_to_sb_db(
                                  ovnsb_txn, ovnsb_idl_loop.idl);
                     check_and_add_supported_dhcpv6_opts_to_sb_db(
@@ -1027,6 +1087,22 @@ main(int argc, char *argv[])
                     clear_idl_track = false;
                 }
 
+                /* Make sure we don't bump the next_cfg when we shouldn't.
+                 * This should prevent ovn-nbctl sync calls to return before
+                 * the SB updates are actually done.
+                 *
+                 * Track that the abort was intentional so we can distinguish
+                 * it from a real commit failure below; otherwise the abort
+                 * would feed back into the force-recompute path, creating a
+                 * busy loop whenever NB.nb_cfg keeps advancing but the
+                 * engine produces no SB activity. */
+                bool ovnsb_txn_aborted_intentionally = false;
+                if (!activity && ovnsb_txn &&
+                    ovnsb_idl_loop.cur_cfg != ovnsb_idl_loop.next_cfg) {
+                    ovsdb_idl_txn_abort(ovnsb_txn);
+                    ovnsb_txn_aborted_intentionally = true;
+                }
+
                 /* If there are any errors, we force a full recompute in order
                  * to ensure we handle all changes. */
                 if (!ovsdb_idl_loop_commit_and_wait(&ovnnb_idl_loop)) {
@@ -1035,7 +1111,8 @@ main(int argc, char *argv[])
                     inc_proc_northd_force_recompute_immediate();
                 }
 
-                if (!ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop)) {
+                if (!ovsdb_idl_loop_commit_and_wait(&ovnsb_idl_loop) &&
+                    !ovnsb_txn_aborted_intentionally) {
                     VLOG_INFO("OVNSB commit failed, "
                               "force recompute next time.");
                     inc_proc_northd_force_recompute_immediate();

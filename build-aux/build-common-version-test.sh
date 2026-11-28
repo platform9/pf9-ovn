@@ -31,10 +31,10 @@ run_patch() {
 }
 
 # --- Part 1: matching versions build cleanly ---
-# OVN_BASE in build-common.sh is currently 24.03.6 - keep this in sync with
+# OVN_BASE in build-common.sh is currently 24.03.9 - keep this in sync with
 # it; a failure here on an otherwise-untouched checkout most likely means
 # someone bumped OVN_BASE without updating this test (or vice versa).
-if ! run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
+if ! run_patch "2026.9.0-v24.03.9" > "$WORKDIR/out.txt" 2>&1; then
     echo "FAIL: pf9_patch_ovn_binary_version rejected a PF9_OVN_VERSION" \
          "that should match the current OVN_BASE. Output:" >&2
     cat "$WORKDIR/out.txt" >&2
@@ -71,12 +71,12 @@ echo "PASS: a PF9_OVN_VERSION missing its -v<version> suffix is also caught."
 # with different PF9 versions / build ids still match. That only works if the binary
 # version baked into configure.ac still has ".pf9." in it - even though the package
 # version (epoch 2, no "pf9") does not - and uses the TeamCity build id, not the number.
-if ! run_patch "2026.9.0-v24.03.6" > "$WORKDIR/out.txt" 2>&1; then
+if ! run_patch "2026.9.0-v24.03.9" > "$WORKDIR/out.txt" 2>&1; then
     cat "$WORKDIR/out.txt" >&2; exit 1
 fi
 binver=$(cat "$ROOT/configure.ac")
-if [ "$binver" != "24.03.6.pf9.2026.9.0.7654321" ]; then
-    echo "FAIL: binary version is '$binver', expected 24.03.6.pf9.2026.9.0.7654321" \
+if [ "$binver" != "24.03.9.pf9.2026.9.0.7654321" ]; then
+    echo "FAIL: binary version is '$binver', expected 24.03.9.pf9.2026.9.0.7654321" \
          "(must keep .pf9. for ovn_version_base() and use the build id, not BUILD_NUMBER=42)." >&2
     exit 1
 fi
@@ -84,9 +84,9 @@ fi
 # "<binary version>-<ovs lib version>-<db schema>".
 strip_pf9() { printf '%s\n' "$1" | sed 's/\.pf9[^-]*//'; }
 a=$(strip_pf9 "${binver}-20.33.0-76.8")
-b=$(strip_pf9 "24.03.6.pf9.2026.4.0.385-20.33.0-76.8")   # older controller, build number
-c=$(strip_pf9 "24.03.6-20.33.0-76.8")                    # northd without a pf9 marker
-if [ "$a" != "24.03.6-20.33.0-76.8" ] || [ "$a" != "$b" ] || [ "$a" != "$c" ]; then
+b=$(strip_pf9 "24.03.9.pf9.2026.4.0.385-20.33.0-76.8")   # older controller, build number
+c=$(strip_pf9 "24.03.9-20.33.0-76.8")                    # northd without a pf9 marker
+if [ "$a" != "24.03.9-20.33.0-76.8" ] || [ "$a" != "$b" ] || [ "$a" != "$c" ]; then
     echo "FAIL: controller/northd versions no longer reduce to the same base: '$a' '$b' '$c'" >&2
     exit 1
 fi
@@ -103,12 +103,12 @@ echo "PASS: a missing or non-numeric TEAMCITY_BUILD_ID fails the build."
 
 # --- Part 6: package versions sort above the old schemes and order by build id ---
 if command -v dpkg >/dev/null 2>&1; then
-    dpkg --compare-versions "2:24.03.6-2026.9.0-100-u22" gt "1:24.03.6-pf9-2026.9.0-999999+u22" \
+    dpkg --compare-versions "2:24.03.9-2026.9.0-100-u22" gt "1:24.03.9-pf9-2026.9.0-999999+u22" \
         && dpkg --compare-versions "2:3.3.6-2026.9.0-100-u22" gt "1:3.3.6-pf9+u22" \
-        && dpkg --compare-versions "2:24.03.6-2026.9.0-101-u22" gt "2:24.03.6-2026.9.0-100-u22" \
-        && dpkg --compare-versions "2:24.03.6-2026.9.0-100-u24" gt "2:24.03.6-2026.9.0-100-u22" \
-        && dpkg --compare-versions "2:24.03.6-2026.9.0-100-u22" ge "2:24.03.6-2026.9.0-100" \
-        && dpkg --compare-versions "2:24.03.6-2026.9.0-1000-u22" gt "2:24.03.6-2026.9.0-999-u22" \
+        && dpkg --compare-versions "2:24.03.9-2026.9.0-101-u22" gt "2:24.03.9-2026.9.0-100-u22" \
+        && dpkg --compare-versions "2:24.03.9-2026.9.0-100-u24" gt "2:24.03.9-2026.9.0-100-u22" \
+        && dpkg --compare-versions "2:24.03.9-2026.9.0-100-u22" ge "2:24.03.9-2026.9.0-100" \
+        && dpkg --compare-versions "2:24.03.9-2026.9.0-1000-u22" gt "2:24.03.9-2026.9.0-999-u22" \
         || { echo "FAIL: deb version ordering is wrong" >&2; exit 1; }
     echo "PASS: deb versions order above the old schemes and by build id."
 else

@@ -164,14 +164,7 @@ icmp,orig=(src=192.168.2.2,dst=192.168.1.2,id=<cleared>,type=8,code=0),reply=(sr
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -344,14 +337,7 @@ icmpv6,orig=(src=fd12::2,dst=fd11::2,id=<cleared>,type=128,code=0),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -456,14 +442,7 @@ icmp,orig=(src=192.168.1.2,dst=172.16.1.2,id=<cleared>,type=8,code=0),reply=(src
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -568,14 +547,7 @@ icmpv6,orig=(src=fd10::2,dst=fd30::2,id=<cleared>,type=128,code=0),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -790,14 +762,7 @@ icmp,orig=(src=192.168.1.2,dst=172.16.1.3,id=<cleared>,type=8,code=0),reply=(src
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -1016,14 +981,7 @@ icmpv6,orig=(src=fd11::2,dst=fd30::3,id=<cleared>,type=128,code=0),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -1330,14 +1288,7 @@ icmpv6,orig=(src=fd11::2,dst=fd30::3,id=<cleared>,type=128,code=0),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -1439,7 +1390,7 @@ OVS_START_L7([bar3], [http])
 check ovn-nbctl --apply-after-lb acl-add foo from-lport 1002 "ip4 && ip4.dst == {172.16.1.2,172.16.1.3,172.16.1.4} && ct.new" drop
 check ovn-nbctl --wait=hv sync
 
-AT_CHECK([ip netns exec foo1 wget 30.0.0.1 -t 3 -T 1], [4], [ignore], [ignore])
+AT_CHECK([ip netns exec foo1 curl 30.0.0.1 --retry 3 --max-time 1], [28], [ignore], [ignore])
 
 AT_CHECK([ovs-appctl dpctl/flush-conntrack])
 
@@ -1603,7 +1554,7 @@ check ovn-nbctl --reject lb-add lb3 30.0.0.10:80 ""
 check ovn-nbctl ls-lb-add foo lb3
 # Filter reset segments
 NETNS_START_TCPDUMP([foo1], [-c 1 -neei foo1 ip[[33:1]]=0x14], [rst])
-NS_CHECK_EXEC([foo1], [wget -q 30.0.0.10],[4])
+NS_CHECK_EXEC([foo1], [curl 30.0.0.10 -s --retry 3 --max-time 1], [7])
 
 OVS_WAIT_UNTIL([
     n_reset=$(cat rst.tcpdump | wc -l)
@@ -1612,14 +1563,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d"])
@@ -1833,14 +1777,7 @@ else
 fi
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d"])
@@ -1941,14 +1878,7 @@ tcp,orig=(src=192.168.1.2,dst=30.0.0.2,sport=<cleared>,dport=<cleared>),reply=(s
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d"])
@@ -2051,14 +1981,7 @@ tcp,orig=(src=fd01::2,dst=fd03::2,sport=<cleared>,dport=<cleared>),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d"])
@@ -2296,14 +2219,7 @@ OVS_WAIT_UNTIL([check_est_flows], [check established flows])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -2353,10 +2269,7 @@ check ovn-nbctl lsp-add public public-rp -- set Logical_Switch_Port public-rp \
 
 check ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext
 
-check ovn-nbctl lsp-add public public1 \
-        -- lsp-set-addresses public1 unknown \
-        -- lsp-set-type public1 localnet \
-        -- lsp-set-options public1 network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public1 phynet
 
 ADD_NAMESPACES(server)
 ADD_VETH(s1, server, br-ext, "172.16.1.100/24", "1a:00:00:00:00:01", \
@@ -2391,14 +2304,7 @@ done
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -2548,14 +2454,7 @@ tcp,orig=(src=fd72::2,dst=fd30::2,sport=<cleared>,dport=<cleared>),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -2719,14 +2618,7 @@ test "x$ct1 = x$exp_ct1" && test "x$ct2 = x$exp_ct2"
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -2892,14 +2784,7 @@ test "x$ct1 = x$exp_ct1" && test "x$ct2 = x$exp_ct2"
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3113,14 +2998,7 @@ test "x$ct1 = x$exp_ct1" && test "x$ct2 = x$exp_ct2" && test "x$ct3 = x$exp_ct3"
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3256,14 +3134,7 @@ tcp,orig=(src=172.16.1.2,dst=172.16.1.11,sport=<cleared>,dport=<cleared>),reply=
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3399,14 +3270,7 @@ tcp,orig=(src=fd72::2,dst=fd72::11,sport=<cleared>,dport=<cleared>),reply=(src=f
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3616,14 +3480,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3813,14 +3670,7 @@ test_connectivity_from_ext bar1 fd12::2
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -3997,14 +3847,7 @@ icmp,orig=(src=192.168.1.3,dst=172.16.1.4,id=<cleared>,type=8,code=0),reply=(src
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4165,14 +4008,7 @@ icmpv6,orig=(src=fd20::1,dst=fd20::4,id=<cleared>,type=128,code=0),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4242,14 +4078,7 @@ OVS_WAIT_WHILE([ovs-appctl dpctl/dump-conntrack zone=$zone_id | grep .])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4408,14 +4237,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4441,6 +4263,7 @@ ovs-vsctl \
 
 # Start ovn-controller
 start_daemon ovn-controller
+ovn-appctl vlog/set poll_loop:dbg
 
 check ovn-nbctl ls-add sw0
 
@@ -4483,16 +4306,10 @@ check ovn-nbctl acl-add pg1 to-lport 1002 "outport == @pg1 && ip4 && ip4.src == 
 # Create a logical router and attach both logical switches
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 router
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 20.0.0.1/24
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 router
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 check ovn-nbctl --reject lb-add lb1 10.0.0.10:80 10.0.0.3:80,20.0.0.3:80
 
@@ -4581,9 +4398,12 @@ ovs-vsctl remove interface ovs-sw1-p1 external_ids iface-id
 wait_row_count Service_Monitor 2
 wait_row_count Service_Monitor 2 status=offline
 
+# Once port is added, status should be online very soon: if it takes more than a few seconds, that's a bug.
+OVS_CTL_TIMEOUT=3
 ovs-vsctl set interface ovs-sw1-p1 external_ids:iface-id=sw1-p1
 wait_row_count Service_Monitor 2
 wait_row_count Service_Monitor 1 status=online
+OVS_CTL_TIMEOUT=30
 
 # Create udp load balancer.
 check ovn-nbctl lb-add lb2 10.0.0.10:80 10.0.0.3:80,20.0.0.3:80 udp
@@ -4623,23 +4443,24 @@ NS_CHECK_EXEC([sw1-p1], [kill $(cat $pid_file)])
 NETNS_START_TCPDUMP([sw0-p2], [-c 1 -neei sw0-p2 ip[[33:1]]=0x14], [rst])
 OVS_WAIT_UNTIL([test 2 = `ovn-sbctl --bare --columns status find \
 service_monitor protocol=tcp | sed '/^$/d' | grep offline | wc -l`])
-NS_CHECK_EXEC([sw0-p2], [wget 10.0.0.10 -v -o wget$i.log],[4])
+NS_CHECK_EXEC([sw0-p2], [curl 10.0.0.10 -v > curl$i.log 2>&1],[7])
 
 OVS_WAIT_UNTIL([
     n_reset=$(cat rst.tcpdump | wc -l)
     test "${n_reset}" = "1"
 ])
 
+ovn-appctl coverage/show > ovn_counters
+AT_CHECK([test 50 -gt $(ovn-appctl -t ovn-controller coverage/read-counter pinctrl_notify_handler_thread)], [0])
+
+# Check that we do not get too many immediate wake up.
+# Tolerate a few for any race conditions.
+AT_CHECK([test 5 -gt `cat ovn-controller.log | \
+grep -c "wakeup due to 0-ms timeout at controller/pinctrl.c:"`])
+
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4709,16 +4530,10 @@ check ovn-nbctl acl-add pg1 to-lport 1002 "outport == @pg1 && ip6 && ip6.src == 
 # Create a logical router and attach both logical switches
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 2001::1/64
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 router
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 2002::1/64
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 router
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 check ovn-nbctl --reject lb-add lb1 [[2001::a]]:80 [[2001::3]]:80,[[2002::3]]:80
 
@@ -4815,14 +4630,7 @@ wait_row_count Service_Monitor 1 status=online
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4871,10 +4679,7 @@ check ovn-nbctl ls-lb-add sw lb-ipv4
 
 check ovn-nbctl lr-add rtr
 check ovn-nbctl lrp-add rtr rtr-sw 00:00:00:00:01:00 42.42.42.254/24
-check ovn-nbctl lsp-add sw sw-rtr                       \
-    -- lsp-set-type sw-rtr router                 \
-    -- lsp-set-addresses sw-rtr 00:00:00:00:01:00 \
-    -- lsp-set-options sw-rtr router-port=rtr-sw
+check ovn-nbctl lsp-add-router-port sw sw-rtr rtr-sw
 
 ADD_NAMESPACES(lsp)
 ADD_VETH(lsp, lsp, br-int, "42.42.42.1/24", "00:00:00:00:00:01", \
@@ -4917,14 +4722,7 @@ NS_CHECK_EXEC([lsp], [nc 88.88.88.89 8080 -z], [0], [ignore], [ignore])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -4970,10 +4768,7 @@ check ovn-nbctl ls-lb-add sw lb-ipv6
 
 check ovn-nbctl lr-add rtr
 check ovn-nbctl lrp-add rtr rtr-sw 00:00:00:00:01:00 4200::00ff/64
-check ovn-nbctl lsp-add sw sw-rtr                       \
-    -- lsp-set-type sw-rtr router                 \
-    -- lsp-set-addresses sw-rtr 00:00:00:00:01:00 \
-    -- lsp-set-options sw-rtr router-port=rtr-sw
+check ovn-nbctl lsp-add-router-port sw sw-rtr rtr-sw
 
 ADD_NAMESPACES(lsp)
 ADD_VETH(lsp, lsp, br-int, "4200::1/64", "00:00:00:00:00:01", "4200::00ff", "nodad")
@@ -5014,14 +4809,7 @@ NS_CHECK_EXEC([lsp], [nc 8800::0089 8080 -z], [0], [ignore], [ignore])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5082,16 +4870,10 @@ check ovn-nbctl lsp-set-port-security sw1-p1-rej "40:54:00:00:00:03 20.0.0.3"
 
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 router
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 20.0.0.1/24
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 router
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 OVN_POPULATE_ARP
 check ovn-nbctl --wait=hv sync
@@ -5247,14 +5029,7 @@ aef0::3 udp port 90" | uniq | wc -l)
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5316,16 +5091,10 @@ check ovn-nbctl lsp-set-port-security sw1-p1-rej "40:54:00:00:00:03 20.0.0.3"
 
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 router
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 20.0.0.1/24
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 router
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 OVN_POPULATE_ARP
 check ovn-nbctl --wait=hv sync
@@ -5484,14 +5253,7 @@ aef0::3 udp port 90" | uniq | wc -l)
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5565,10 +5327,7 @@ check ovn-nbctl acl-add pg0 to-lport 1002 "outport == @pg0 && ip4 && ip4.src == 
 # Create a logical router and attach to logical switch.
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 router
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lb-add lb1 10.0.0.10:80 10.0.0.3:80
 check ovn-nbctl --wait=sb ls-lb-add sw0 lb1
@@ -5607,14 +5366,7 @@ AT_CHECK([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5662,10 +5414,7 @@ check ovn-nbctl lsp-set-addresses sw1-port2 "40:54:00:00:00:04 20.0.0.4"
 
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 20.0.0.1/24
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 router
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 
 check ovn-nbctl ls-add sw2
@@ -5673,10 +5422,7 @@ check ovn-nbctl lsp-add sw2 sw2-port1
 check ovn-nbctl lsp-set-addresses sw2-port1 "50:54:00:00:00:03 30.0.0.3"
 
 check ovn-nbctl lrp-add lr0 lr0-sw2 00:00:00:00:ff:03 30.0.0.1/24
-check ovn-nbctl lsp-add sw2 sw2-lr0
-check ovn-nbctl lsp-set-type sw2-lr0 router
-check ovn-nbctl lsp-set-addresses sw2-lr0 router
-check ovn-nbctl lsp-set-options sw2-lr0 router-port=lr0-sw2
+check ovn-nbctl lsp-add-router-port sw2 sw2-lr0 lr0-sw2
 
 
 check ovn-nbctl lb-add lb0 "30.0.0.10:80" "20.0.0.4:80"
@@ -5727,14 +5473,7 @@ NS_CHECK_EXEC([sw0-p1-lbc], [nc -z 30.0.0.10 80], [0], [ignore], [ignore])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5774,10 +5513,7 @@ check ovn-nbctl                                                  \
     -- lr-add rtr                                                \
     -- lrp-add rtr rtr-ls 00:00:00:00:01:00 42.42.42.1/24        \
     -- ls-add ls                                                 \
-    -- lsp-add ls ls-rtr                                         \
-    -- lsp-set-addresses ls-rtr 00:00:00:00:01:00                \
-    -- lsp-set-type ls-rtr router                                \
-    -- lsp-set-options ls-rtr router-port=rtr-ls                 \
+    -- lsp-add-router-port ls ls-rtr rtr-ls                      \
     -- lsp-add ls vm1 -- lsp-set-addresses vm1 00:00:00:00:00:01 \
     -- lsp-add ls vm2 -- lsp-set-addresses vm2 00:00:00:00:00:02 \
     -- lb-add lb-test 66.66.66.66:666 42.42.42.2:4242 tcp        \
@@ -5837,14 +5573,7 @@ tcp,orig=(src=42.42.42.3,dst=66.66.66.66,sport=<clnt_s_port>,dport=666),reply=(s
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -5884,10 +5613,7 @@ check ovn-nbctl                                                  \
     -- lr-add rtr                                                \
     -- lrp-add rtr rtr-ls 00:00:00:00:01:00 4242::1/64           \
     -- ls-add ls                                                 \
-    -- lsp-add ls ls-rtr                                         \
-    -- lsp-set-addresses ls-rtr 00:00:00:00:01:00                \
-    -- lsp-set-type ls-rtr router                                \
-    -- lsp-set-options ls-rtr router-port=rtr-ls                 \
+    -- lsp-add-router-port ls ls-rtr rtr-ls                      \
     -- lsp-add ls vm1 -- lsp-set-addresses vm1 00:00:00:00:00:01 \
     -- lsp-add ls vm2 -- lsp-set-addresses vm2 00:00:00:00:00:02 \
     -- lb-add lb-test [[6666::1]]:666 [[4242::2]]:4242 tcp       \
@@ -5947,14 +5673,7 @@ tcp,orig=(src=4242::3,dst=6666::1,sport=<clnt_s_port>,dport=666),reply=(src=4242
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -6041,14 +5760,7 @@ NS_CHECK_EXEC([sw0-p1-f], [ping -q -c 3 -i 0.3 -w 2 10.0.0.5 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -6250,14 +5962,7 @@ tcp,orig=(src=172.16.0.1,dst=10.0.0.2,sport=<cleared>,dport=<cleared>),reply=(sr
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -6477,14 +6182,7 @@ tcp,orig=(src=fd07::1,dst=fd01::2,sport=<cleared>,dport=<cleared>),reply=(src=fd
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -6526,14 +6224,7 @@ OVS_WAIT_UNTIL([test x$(ovn-nbctl lsp-get-up sw0-port1) = xdown])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -6596,10 +6287,7 @@ ADD_VETH(ext-foo, ext-foo, br-ext, "172.16.1.100/24", "00:10:10:01:02:13", \
          "172.16.1.1")
 
 AT_CHECK([ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext])
-check ovn-nbctl lsp-add public public1 \
-        -- lsp-set-addresses public1 unknown \
-        -- lsp-set-type public1 localnet \
-        -- lsp-set-options public1 network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public1 phynet
 
 check ovn-nbctl --wait=hv sync
 
@@ -6617,14 +6305,7 @@ icmp,orig=(src=192.168.1.2,dst=172.16.1.100,id=<cleared>,type=8,code=0),reply=(s
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
@@ -6692,15 +6373,9 @@ ADD_VETH(ext, ext, br-ext, "192.168.3.2/24", "f0:00:00:01:02:06")
 AT_CHECK([ovs-vsctl remove interface ovs-ext external-ids iface-id=ext])
 
 AT_CHECK([ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=public:br-public,ext:br-ext])
-check ovn-nbctl lsp-add sw0 public \
-        -- lsp-set-addresses public unknown \
-        -- lsp-set-type public localnet \
-        -- lsp-set-options public network_name=public
+check ovn-nbctl lsp-add-localnet-port sw0 public public
 
-check ovn-nbctl lsp-add sw1 ext \
-        -- lsp-set-addresses ext unknown \
-        -- lsp-set-type ext localnet \
-        -- lsp-set-options ext network_name=ext
+check ovn-nbctl lsp-add-localnet-port sw1 ext ext
 
 AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_min_rate=200000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_max_rate=300000])
@@ -6712,11 +6387,11 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port ext options:qos_burst=6000000])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 3.....b cburst 3.....b'])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 750000b cburst 750000b'])
+                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 7.....b cburst 7.....b'])
 
 # The same now with ovs db read only
 #
@@ -6734,24 +6409,24 @@ wake_up_ovsdb .
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 3.....b cburst 3.....b'])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 750000b cburst 750000b'])
+                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 7.....b cburst 7.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_min_rate=200000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_max_rate=300000])
 
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 12Kbit ceil 34359Mbit burst 375000b cburst 373662b'])
+                grep -q 'class htb .* rate 12Kbit ceil 34359Mbit burst 3.....b cburst 3.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_burst=3000000])
 OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-public')" = ""])
 
 AT_CHECK([ovn-nbctl set Logical_Switch_Port ext options:qos_max_rate=800000])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
+                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
 
 AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_min_rate=400000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_max_rate=800000])
@@ -6759,7 +6434,7 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_burst=6000000])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
+                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port ext options qos_min_rate=400000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port ext options qos_max_rate=800000])
@@ -6769,7 +6444,7 @@ OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-ext')" = ""])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
+                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_min_rate=400000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_max_rate=800000])
@@ -6787,25 +6462,25 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw11 options:qos_burst=6000000])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 375000b cburst 374999b'])
+                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 3.....b cburst 3.....b'])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b'])
+                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b'])
 
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_min_rate=300000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_max_rate=500000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_burst=3000000])
 
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
 
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_min_rate=400000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_max_rate=500000])
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_burst=3000000])
 
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_min_rate=300000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_max_rate=500000])
@@ -6813,9 +6488,9 @@ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_burst=3000000])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 375000b cburst 374999b'])
+                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 3.....b cburst 3.....b'])
 OVS_WAIT_UNTIL([test "$(tc class show dev ovs-public | \
-                grep 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 375000b cburst 375000b')" = ""])
+                grep 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 3.....b cburst 3.....b')" = ""])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw01 options qos_min_rate=200000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw01 options qos_max_rate=350000])
@@ -6824,9 +6499,9 @@ OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-public')" = ""])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b'])
+                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b'])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_min_rate=400000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_max_rate=700000])
@@ -6834,9 +6509,9 @@ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_burst=6000000])
 
 OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
 OVS_WAIT_UNTIL([test "$(tc class show dev ovs-ext | \
-                grep 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b')" = ""])
+                grep 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b')" = ""])
 OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
+                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
 
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw12 options qos_min_rate=400000])
 AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw12 options qos_max_rate=500000])
@@ -6849,18 +6524,11 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_max_rate=6000000000
 AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_burst=1000000])
 
 OVS_WAIT_UNTIL([tc class show dev ovs-public | \
-                grep -q 'class htb .* prio 0 rate 5Gbit ceil 6Gbit burst 125000b cburst 124500b'])
+                grep -q 'class htb .* prio 0 rate 5Gbit ceil 6Gbit burst 1.....b cburst 1.....b'])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
@@ -6933,10 +6601,7 @@ ADD_VETH(s1, server, br-ext, "172.16.1.50/24", "f0:00:00:01:02:05", \
 NS_CHECK_EXEC([server], [ip addr add 1000::b/64 dev s1])
 
 AT_CHECK([ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext])
-check ovn-nbctl lsp-add public public1 \
-        -- lsp-set-addresses public1 unknown \
-        -- lsp-set-type public1 localnet \
-        -- lsp-set-options public1 network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public1 phynet
 
 NS_CHECK_EXEC([server], [bfdd-beacon --listen=172.16.1.50], [0])
 NS_CHECK_EXEC([server], [bfdd-control allow 172.16.1.1], [0], [dnl
@@ -7050,14 +6715,7 @@ check ovn-nbctl destroy bfd $uuid_v6
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
@@ -7179,14 +6837,7 @@ AT_CHECK([ovs-appctl dpctl/dump-flows | grep ct_mark | grep -v ipv6 -c], [1], [d
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -7242,17 +6893,11 @@ check ovn-nbctl lsp-add ls-pub ext-router -- lsp-set-addresses ext-router "00:00
 
 check ovn-nbctl lr-add lr1
 check ovn-nbctl lrp-add lr1 lr1-ls1 00:00:00:00:00:01 192.168.100.1/24
-check ovn-nbctl lsp-add ls1 ls1-lr1                      \
-    -- lsp-set-type ls1-lr1 router                 \
-    -- lsp-set-addresses ls1-lr1 00:00:00:00:00:01 \
-    -- lsp-set-options ls1-lr1 router-port=lr1-ls1
+check ovn-nbctl lsp-add-router-port ls1 ls1-lr1 lr1-ls1
 
 check ovn-nbctl lrp-add lr1 lr1-ls-pub 00:00:00:00:01:01 172.18.1.1/24
 check ovn-nbctl lrp-set-gateway-chassis lr1-ls-pub hv1
-check ovn-nbctl lsp-add ls-pub ls-pub-lr1                      \
-    -- lsp-set-type ls-pub-lr1 router                    \
-    -- lsp-set-addresses ls-pub-lr1 00:00:00:00:01:01    \
-    -- lsp-set-options ls-pub-lr1 router-port=lr1-ls-pub
+check ovn-nbctl lsp-add-router-port ls-pub ls-pub-lr1 lr1-ls-pub
 
 check ovn-nbctl lr-nat-add lr1 snat 172.18.1.1 192.168.100.0/24
 check ovn-nbctl lr-nat-add lr1 dnat_and_snat 172.18.2.10 192.168.100.6
@@ -7304,14 +6949,7 @@ NS_CHECK_EXEC([vm2], [ping -q -c 3 -i 0.3 -w 2 172.18.2.10 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
@@ -7370,31 +7008,19 @@ check ovn-nbctl ls-add ls-pub
 
 check ovn-nbctl lr-add lr1
 check ovn-nbctl lrp-add lr1 lr1-ls1 00:00:00:00:01:01 192.168.100.1/24
-check ovn-nbctl lsp-add ls1 ls1-lr1                      \
-    -- lsp-set-type ls1-lr1 router                 \
-    -- lsp-set-addresses ls1-lr1 router            \
-    -- lsp-set-options ls1-lr1 router-port=lr1-ls1
+check ovn-nbctl lsp-add-router-port ls1 ls1-lr1 lr1-ls1
 
 check ovn-nbctl lr-add lr2
 check ovn-nbctl lrp-add lr2 lr2-ls2 00:00:00:00:02:01 192.168.200.1/24
-check ovn-nbctl lsp-add ls2 ls2-lr2                      \
-    -- lsp-set-type ls2-lr2 router                 \
-    -- lsp-set-addresses ls2-lr2 router            \
-    -- lsp-set-options ls2-lr2 router-port=lr2-ls2
+check ovn-nbctl lsp-add-router-port ls2 ls2-lr2 lr2-ls2
 
 check ovn-nbctl lrp-add lr1 lr1-ls-pub 00:00:00:00:03:01 172.18.2.110/24
 check ovn-nbctl lrp-set-gateway-chassis lr1-ls-pub hv1
-check ovn-nbctl lsp-add ls-pub ls-pub-lr1                      \
-    -- lsp-set-type ls-pub-lr1 router                    \
-    -- lsp-set-addresses ls-pub-lr1 router               \
-    -- lsp-set-options ls-pub-lr1 router-port=lr1-ls-pub
+check ovn-nbctl lsp-add-router-port ls-pub ls-pub-lr1 lr1-ls-pub
 
 check ovn-nbctl lrp-add lr2 lr2-ls-pub 00:00:00:00:03:02 172.18.1.173/24
 check ovn-nbctl lrp-set-gateway-chassis lr2-ls-pub hv1
-check ovn-nbctl lsp-add ls-pub ls-pub-lr2                      \
-    -- lsp-set-type ls-pub-lr2 router                    \
-    -- lsp-set-addresses ls-pub-lr2 router               \
-    -- lsp-set-options ls-pub-lr2 router-port=lr2-ls-pub
+check ovn-nbctl lsp-add-router-port ls-pub ls-pub-lr2 lr2-ls-pub
 
 # Putting --add-route on these NAT rules means there is no need to
 # add any static routes.
@@ -7421,14 +7047,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.2.12 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -7489,10 +7108,7 @@ ADD_VETH(s1, server, br-ext, "172.16.1.50/24", "f0:00:00:01:02:05", \
          "172.16.1.1")
 
 AT_CHECK([ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext])
-check ovn-nbctl lsp-add public public1 \
-        -- lsp-set-addresses public1 unknown \
-        -- lsp-set-type public1 localnet \
-        -- lsp-set-options public1 network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public1 phynet
 
 NETNS_START_TCPDUMP([sw01], [-n -i sw01 icmp -Q in], [reject])
 check ovn-nbctl meter-add acl-meter drop 1 pktps 0
@@ -7634,14 +7250,7 @@ OVS_WAIT_UNTIL([test "1" = "$(grep -c "dl_dst=33:33:33:33:33:33" ovn-controller.
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
@@ -7777,14 +7386,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -7919,14 +7521,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8020,14 +7615,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8121,14 +7709,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8186,16 +7767,10 @@ ADD_VETH(sw1p1, sw1p1, br-int, "20.0.0.3/24", "50:54:00:00:00:03", \
 # Create a logical router and attach both logical switches
 check ovn-nbctl lr-add lr0
 check ovn-nbctl lrp-add lr0 lr0-sw0 00:00:00:00:ff:01 10.0.0.1/24
-check ovn-nbctl lsp-add sw0 sw0-lr0
-check ovn-nbctl lsp-set-type sw0-lr0 router
-check ovn-nbctl lsp-set-addresses sw0-lr0 00:00:00:00:ff:01
-check ovn-nbctl lsp-set-options sw0-lr0 router-port=lr0-sw0
+check ovn-nbctl lsp-add-router-port sw0 sw0-lr0 lr0-sw0
 
 check ovn-nbctl lrp-add lr0 lr0-sw1 00:00:00:00:ff:02 20.0.0.1/24
-check ovn-nbctl lsp-add sw1 sw1-lr0
-check ovn-nbctl lsp-set-type sw1-lr0 router
-check ovn-nbctl lsp-set-addresses sw1-lr0 00:00:00:00:ff:02
-check ovn-nbctl lsp-set-options sw1-lr0 router-port=lr0-sw1
+check ovn-nbctl lsp-add-router-port sw1 sw1-lr0 lr0-sw1
 
 # Ensure ovn-controller is caught up
 check ovn-nbctl --wait=hv sync
@@ -8221,14 +7796,7 @@ AT_CHECK([ip netns exec sw0p1 wget 20.0.0.3 -t 3 -T 1], [0], [ignore], [ignore])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8308,6 +7876,7 @@ check_acl_log_count 2
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8320,6 +7889,7 @@ check $PYTHON $srcdir/check_acl_log.py \
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=2 \
     --name=allow_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:02 \
@@ -8344,6 +7914,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8367,6 +7938,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8389,6 +7961,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8406,11 +7979,13 @@ clear_log
 test_ping
 
 # Now we should have the request and reply logged.
+# Note that reply traffic is now logged as to-lport.
 check_acl_log_count 2
 
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8423,6 +7998,7 @@ check $PYTHON $srcdir/check_acl_log.py \
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=2 \
     --name=allow_related_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:02 \
@@ -8431,7 +8007,6 @@ check $PYTHON $srcdir/check_acl_log.py \
     --nw_dst=10.0.0.1 \
     --icmp_type=0 \
     --icmp_code=0
-
 
 # And now, let's start from scratch but make sure everything works when
 # using egress ACLs.
@@ -8451,6 +8026,7 @@ check_acl_log_count 2
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8463,6 +8039,7 @@ check $PYTHON $srcdir/check_acl_log.py \
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=2 \
     --name=allow_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:02 \
@@ -8487,6 +8064,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8510,6 +8088,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8532,6 +8111,7 @@ check_acl_log_count 1
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
+    --direction=to-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:01 \
@@ -8549,23 +8129,13 @@ clear_log
 test_ping
 
 # Now we should have the request and reply logged.
+# Note that reply traffic is from-lport, so it is sorted first.
 check_acl_log_count 2
 
 check $PYTHON $srcdir/check_acl_log.py \
     --entry-num=1 \
     --name=allow_related_acl \
-    --verdict=allow \
-    --protocol=icmp \
-    --dl_src=00:00:00:00:00:01 \
-    --dl_dst=00:00:00:00:00:02 \
-    --nw_src=10.0.0.1 \
-    --nw_dst=10.0.0.2 \
-    --icmp_type=8 \
-    --icmp_code=0
-
-check $PYTHON $srcdir/check_acl_log.py \
-    --entry-num=2 \
-    --name=allow_related_acl \
+    --direction=from-lport \
     --verdict=allow \
     --protocol=icmp \
     --dl_src=00:00:00:00:00:02 \
@@ -8575,17 +8145,22 @@ check $PYTHON $srcdir/check_acl_log.py \
     --icmp_type=0 \
     --icmp_code=0
 
+check $PYTHON $srcdir/check_acl_log.py \
+    --entry-num=2 \
+    --name=allow_related_acl \
+    --direction=to-lport \
+    --verdict=allow \
+    --protocol=icmp \
+    --dl_src=00:00:00:00:00:01 \
+    --dl_dst=00:00:00:00:00:02 \
+    --nw_src=10.0.0.1 \
+    --nw_dst=10.0.0.2 \
+    --icmp_type=8 \
+    --icmp_code=0
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8707,14 +8282,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8769,14 +8337,7 @@ NS_CHECK_EXEC([sw0-p1.2], [ping -q -c 3 -i 0.3 -w 2 10.0.0.3 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8818,23 +8379,15 @@ check ovn-nbctl lsp-set-addresses ls1p2 "00:00:00:01:01:02 192.168.1.2 2001::2"
 
 check ovn-nbctl lr-add lr1
 check ovn-nbctl lrp-add lr1 lr1-ls1 00:00:00:00:00:01 192.168.1.254/24 2001::a/64
-check ovn-nbctl lsp-add ls1 ls1-lr1
-check ovn-nbctl lsp-set-addresses ls1-lr1 "00:00:00:00:00:01 192.168.1.254 2001::a"
-check ovn-nbctl lsp-set-type ls1-lr1 router
-check ovn-nbctl lsp-set-options ls1-lr1 router-port=lr1-ls1
+check ovn-nbctl lsp-add-router-port ls1 ls1-lr1 lr1-ls1
 
 check ovn-nbctl set logical_router lr1 options:chassis=hv1
 
 check ovn-nbctl lrp-add lr1 lr1-pub 00:00:00:00:0f:01 172.16.1.254/24 1711::a/64
 check ovn-nbctl ls-add pub
-check ovn-nbctl lsp-add pub pub-lr1
-check ovn-nbctl lsp-set-type pub-lr1 router
-check ovn-nbctl lsp-set-options pub-lr1 router-port=lr1-pub
-check ovn-nbctl lsp-set-addresses pub-lr1 router
+check ovn-nbctl lsp-add-router-port pub pub-lr1 lr1-pub
 
-check ovn-nbctl lsp-add pub ln -- lsp-set-options ln network_name=provider
-check ovn-nbctl lsp-set-type ln localnet
-check ovn-nbctl lsp-set-addresses ln unknown
+check ovn-nbctl lsp-add-localnet-port pub ln provider
 
 check ovn-nbctl lr-nat-add lr1 snat 172.16.1.10 192.168.1.0/24
 check ovn-nbctl lr-nat-add lr1 snat 1711::10 2001::/64
@@ -8866,14 +8419,7 @@ NS_CHECK_EXEC([ls1p1], [ping6 -q -c 3 -i 0.3 -w 2 1711::1  | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -8975,14 +8521,7 @@ AT_CHECK([grep -qE 'Too many active mcast flows' northd/ovn-northd.log], [1])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9019,15 +8558,10 @@ check ovs-vsctl set open . external-ids:ovn-chassis-mac-mappings="phys:ee:00:00:
 
 check ovn-nbctl ls-add internal
 
-check ovn-nbctl lsp-add internal ln_internal "" 100
-check ovn-nbctl lsp-set-addresses ln_internal unknown
-check ovn-nbctl lsp-set-type ln_internal localnet
-check ovn-nbctl lsp-set-options ln_internal network_name=phys
+check ovn-nbctl lsp-add-localnet-port internal ln_internal phys
+check ovn-nbctl set logical_switch_port ln_internal tag_request=100
 
-check ovn-nbctl lsp-add internal internal-gw
-check ovn-nbctl lsp-set-type internal-gw router
-check ovn-nbctl lsp-set-addresses internal-gw router
-check ovn-nbctl lsp-set-options internal-gw router-port=gw-internal
+check ovn-nbctl lsp-add-router-port internal internal-gw gw-internal
 
 check ovn-nbctl lsp-add internal vif0
 # Set address as unknown so that LRP has to generate ARP request
@@ -9049,14 +8583,7 @@ NS_CHECK_EXEC([vif0], [ping -q -c 3 -i 0.3 -w 1 192.168.20.1 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9094,15 +8621,9 @@ start_daemon ovn-controller
 check ovn-nbctl ls-add ls0
 check ovn-nbctl ls-add ls1
 
-check ovn-nbctl lsp-add ls0 ls0-lr
-check ovn-nbctl lsp-set-type ls0-lr router
-check ovn-nbctl lsp-set-addresses ls0-lr 00:00:00:00:10:00 router
-check ovn-nbctl lsp-set-options ls0-lr router-port=lr-ls0
+check ovn-nbctl lsp-add-router-port ls0 ls0-lr lr-ls0
 
-check ovn-nbctl lsp-add ls1 ls1-lr
-check ovn-nbctl lsp-set-type ls1-lr router
-check ovn-nbctl lsp-set-addresses ls1-lr 00:00:00:00:20:00 router
-check ovn-nbctl lsp-set-options ls1-lr router-port=lr-ls1
+check ovn-nbctl lsp-add-router-port ls1 ls1-lr lr-ls1
 
 check ovn-nbctl lsp-add ls0 client
 check ovn-nbctl lsp-set-addresses client "00:00:00:00:10:10 192.168.10.10"
@@ -9257,14 +8778,7 @@ udp,orig=(src=192.168.10.10,dst=192.168.20.20,sport=<cleared>,dport=<cleared>),r
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9310,17 +8824,11 @@ check ovn-nbctl                                                   \
     -- lrp-add rtr rtr-ls1 00:00:00:00:01:00 42.42.42.1/24        \
     -- lrp-add rtr rtr-ls2 00:00:00:00:02:00 43.43.43.1/24        \
     -- ls-add ls1                                                 \
-    -- lsp-add ls1 ls1-rtr                                        \
-    -- lsp-set-addresses ls1-rtr 00:00:00:00:01:00                \
-    -- lsp-set-type ls1-rtr router                                \
-    -- lsp-set-options ls1-rtr router-port=rtr-ls1                \
+    -- lsp-add-router-port ls1 ls1-rtr rtr-ls1                    \
     -- lsp-add ls1 vm1 -- lsp-set-addresses vm1 00:00:00:00:00:01 \
     -- lsp-add ls1 vm2 -- lsp-set-addresses vm2 00:00:00:00:00:02 \
     -- ls-add ls2                                                 \
-    -- lsp-add ls2 ls2-rtr                                        \
-    -- lsp-set-addresses ls2-rtr 00:00:00:00:02:00                \
-    -- lsp-set-type ls2-rtr router                                \
-    -- lsp-set-options ls2-rtr router-port=rtr-ls2                \
+    -- lsp-add-router-port ls2 ls2-rtr rtr-ls2                    \
     -- lsp-add ls2 vm3 -- lsp-set-addresses vm3 00:00:00:00:00:03
 
 # Add a TCP template LB that eventually expands to:
@@ -9407,14 +8915,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9461,17 +8962,11 @@ check ovn-nbctl                                                   \
     -- lrp-add rtr rtr-ls1 00:00:00:00:01:00 4242::1/64           \
     -- lrp-add rtr rtr-ls2 00:00:00:00:02:00 4343::1/64           \
     -- ls-add ls1                                                 \
-    -- lsp-add ls1 ls1-rtr                                        \
-    -- lsp-set-addresses ls1-rtr 00:00:00:00:01:00                \
-    -- lsp-set-type ls1-rtr router                                \
-    -- lsp-set-options ls1-rtr router-port=rtr-ls1                \
+    -- lsp-add-router-port ls1 ls1-rtr rtr-ls1                    \
     -- lsp-add ls1 vm1 -- lsp-set-addresses vm1 00:00:00:00:00:01 \
     -- lsp-add ls1 vm2 -- lsp-set-addresses vm2 00:00:00:00:00:02 \
     -- ls-add ls2                                                 \
-    -- lsp-add ls2 ls2-rtr                                        \
-    -- lsp-set-addresses ls2-rtr 00:00:00:00:02:00                \
-    -- lsp-set-type ls2-rtr router                                \
-    -- lsp-set-options ls2-rtr router-port=rtr-ls2                \
+    -- lsp-add-router-port ls2 ls2-rtr rtr-ls2                    \
     -- lsp-add ls2 vm3 -- lsp-set-addresses vm3 00:00:00:00:00:03
 
 # Add a template LB that eventually expands to:
@@ -9558,14 +9053,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9644,10 +9132,7 @@ check ovn-nbctl lsp-add sw1 sw11 \
 check ovn-nbctl lr-nat-add R1 dnat_and_snat 172.16.1.3 192.168.2.2 sw11 00:00:02:02:03:10
 
 AT_CHECK([ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext])
-check ovn-nbctl lsp-add public public1 \
-        -- lsp-set-addresses public1 unknown \
-        -- lsp-set-type public1 localnet \
-        -- lsp-set-options public1 network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public1 phynet
 
 OVN_POPULATE_ARP
 
@@ -9686,14 +9171,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9825,7 +9303,7 @@ OVS_WAIT_UNTIL([ovs-ofctl -O OpenFlow13 dump-groups br-int | \
 grep 'nat(dst=192.168.2.2:80)'])
 
 # should not dnat so will not be able to connect
-AT_CHECK([ip netns exec foo1 wget   30.30.30.30  -t 3 -T 1], [4], [ignore], [ignore])
+AT_CHECK([ip netns exec foo1 curl 30.30.30.30 --retry 3 --max-time 1], [28], [ignore], [ignore])
 
 # check conntrack zone has no tcp entry
 AT_CHECK([ovs-appctl dpctl/dump-conntrack zone=$zone_id | \
@@ -9837,14 +9315,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -9895,14 +9366,14 @@ check ovn-nbctl lsp-add bar rp-bar -- set Logical_Switch_Port rp-bar \
 # Logical port 'foo1' in switch 'foo'.
 ADD_NAMESPACES(foo1)
 ADD_VETH(foo1, foo1, br-int, "fd11::2/64", "f0:00:00:01:02:03", \
-         "fd11::1")
+         "fd11::1", "nodad")
 check ovn-nbctl lsp-add foo foo1 \
 -- lsp-set-addresses foo1 "f0:00:00:01:02:03 fd11::2"
 
 # Logical port 'bar1' in switch 'bar'.
 ADD_NAMESPACES(bar1)
 ADD_VETH(bar1, bar1, br-int, "fd12::2/64", "f0:00:00:01:02:05", \
-"fd12::1")
+         "fd12::1", "nodad")
 check ovn-nbctl lsp-add bar bar1 \
 -- lsp-set-addresses bar1 "f0:00:00:01:02:05 fd12::2"
 
@@ -9919,7 +9390,6 @@ grep 'nat(dst=\[[fd12::2\]]:80)'])
 zone_id=$(ovn-appctl -t ovn-controller ct-zone-list | grep foo1 | cut -d ' ' -f2)
 
 OVS_START_L7([bar1], [http6])
-
 AT_CHECK([ip netns exec foo1  wget http://[[fd12::2]] -t 3 -T 1], [0], [ignore], [ignore])
 
 # check conntrack zone has tcp entry
@@ -9970,7 +9440,7 @@ OVS_WAIT_UNTIL([ovs-ofctl -O OpenFlow13 dump-groups br-int | \
 grep 'nat(dst=\[[fd12::2\]]:80)'])
 
 # should not dnat so will not be able to connect
-AT_CHECK([ip netns exec foo1 wget  http://[[fd30::2]]  -t 3 -T 1], [4], [ignore], [ignore])
+AT_CHECK([ip netns exec foo1 curl http://[[fd30::2]] --retry 3 --max-time 1], [28], [ignore], [ignore])
 #
 # check conntrack zone has no tcp entry
 AT_CHECK([ovs-appctl dpctl/dump-conntrack zone=$zone_id | \
@@ -9982,14 +9452,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10036,10 +9499,7 @@ check ovn-nbctl ls-add ls1
 check ovn-nbctl lsp-add ls1 ls1p1 \
     -- lsp-set-addresses ls1p1 "00:00:00:00:01:11 10.244.2.11"
 
-check ovn-nbctl lsp-add ls1 ls1-to-cluster-router \
-    -- lsp-set-type ls1-to-cluster-router router \
-    -- lsp-set-options ls1-to-cluster-router router-port=cluster-router-to-ls1 \
-    -- lsp-set-addresses ls1-to-cluster-router router
+check ovn-nbctl lsp-add-router-port ls1 ls1-to-cluster-router cluster-router-to-ls1
 
 # Add cluster-router ports
 check ovn-nbctl lrp-add cluster-router cluster-router-to-ls1 "00:00:00:0f:01:01" 10.244.2.1/24 \
@@ -10048,14 +9508,8 @@ check ovn-nbctl lrp-add cluster-router cluster-router-to-ls1 "00:00:00:0f:01:01"
     -- --policy=src-ip lr-route-add cluster-router 10.244.2.0/24 100.64.0.3
 
 # Add join ports
-check ovn-nbctl lsp-add join join-to-cluster-router \
-    -- lsp-set-type join-to-cluster-router router \
-    -- lsp-set-options join-to-cluster-router router-port=cluster-router-to-join \
-    -- lsp-set-addresses join-to-cluster-router router \
-    -- lsp-add join join-to-gr1 \
-    -- lsp-set-type join-to-gr1 router \
-    -- lsp-set-options join-to-gr1 router-port=gr1-to-join \
-    -- lsp-set-addresses join-to-gr1 router
+check ovn-nbctl lsp-add-router-port join join-to-cluster-router cluster-router-to-join \
+    -- lsp-add-router-port join join-to-gr1 gr1-to-join
 
 check ovn-nbctl set logical_router gr1 options:lb_force_snat_ip=router_ip \
     -- set logical_router gr1 options:snat-ct-zone=0 \
@@ -10069,14 +9523,8 @@ check ovn-nbctl lrp-add gr1 gr1-to-join "00:00:00:0f:02:03" 100.64.0.3/16 \
     -- set logical_router gr1 options:chassis=hv1
 
 # Add public1 ports
-check ovn-nbctl lsp-add public1 public1-to-gr1 \
-    -- lsp-set-type public1-to-gr1 router \
-    -- lsp-set-options public1-to-gr1 router-port=gr1-to-public1 \
-    -- lsp-set-addresses public1-to-gr1 router \
-    -- lsp-add public1 ln1 \
-    -- lsp-set-type ln1 localnet \
-    -- lsp-set-options ln1 network_name=provider \
-    -- lsp-set-addresses ln1 unknown
+check ovn-nbctl lsp-add-router-port public1 public1-to-gr1 gr1-to-public1 \
+    -- lsp-add-localnet-port public1 ln1 provider
 
 check ovn-nbctl --wait=hv sync
 
@@ -10093,14 +9541,7 @@ NS_CHECK_EXEC([ns_ls1p1], [ping -q -c 3 -i 0.3 -w 2 10.89.189.1 | FORMAT_PING], 
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10235,14 +9676,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 10.0.0.2 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10449,14 +9883,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(30.0.0.1) | sed -e 's/zone
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10509,10 +9936,7 @@ check ovn-nbctl lsp-add ls1 ls1p1 \
 check ovn-nbctl lsp-add ls1 ls1p2 \
     -- lsp-set-addresses ls1p2 "00:00:00:00:01:12 10.0.0.12"
 
-check ovn-nbctl lsp-add ls1 ls1-to-lr1 \
-    -- lsp-set-type ls1-to-lr1 router \
-    -- lsp-set-options ls1-to-lr1 router-port=lr1-to-ls1 \
-    -- lsp-set-addresses ls1-to-lr1 router
+check ovn-nbctl lsp-add-router-port ls1 ls1-to-lr1 lr1-to-ls1
 
 # Add ls1 virtual port
 check ovn-nbctl lsp-add ls1 vip \
@@ -10530,14 +9954,8 @@ check ovn-nbctl lrp-add lr1 lr1-to-ls1 "00:00:00:0f:01:01" 10.0.0.1/24 \
 check ovn-nbctl lr-nat-add lr1 dnat_and_snat 172.0.0.88 10.0.0.88 vip 10:54:00:00:00:88
 
 # Add public1 ports
-check ovn-nbctl lsp-add public1 public1-to-lr1 \
-    -- lsp-set-type public1-to-lr1 router \
-    -- lsp-set-options public1-to-lr1 router-port=lr1-to-public1 \
-    -- lsp-set-addresses public1-to-lr1 router \
-    -- lsp-add public1 ln1 \
-    -- lsp-set-type ln1 localnet \
-    -- lsp-set-options ln1 network_name=provider \
-    -- lsp-set-addresses ln1 unknown
+check ovn-nbctl lsp-add-router-port public1 public1-to-lr1 lr1-to-public1 \
+    -- lsp-add-localnet-port public1 ln1 provider
 
 check ovn-nbctl --wait=hv sync
 
@@ -10599,14 +10017,7 @@ NS_CHECK_EXEC([ns_ext1], [ping -q -c 3 -i 0.3 -w 2 172.0.0.88 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10638,16 +10049,10 @@ check ovn-nbctl lrp-add r1 r1_s1 00:de:ad:fe:00:01 173.0.1.1/24
 check ovn-nbctl lrp-add r1 r1_s2 00:de:ad:fe:00:02 173.0.2.1/24
 
 check ovn-nbctl ls-add s1
-check ovn-nbctl lsp-add s1 s1_r1
-check ovn-nbctl lsp-set-type s1_r1 router
-check ovn-nbctl lsp-set-addresses s1_r1 router
-check ovn-nbctl lsp-set-options s1_r1 router-port=r1_s1
+check ovn-nbctl lsp-add-router-port s1 s1_r1 r1_s1
 
 check ovn-nbctl ls-add s2
-check ovn-nbctl lsp-add s2 s2_r1
-check ovn-nbctl lsp-set-type s2_r1 router
-check ovn-nbctl lsp-set-addresses s2_r1 router
-check ovn-nbctl lsp-set-options s2_r1 router-port=r1_s2
+check ovn-nbctl lsp-add-router-port s2 s2_r1 r1_s2
 
 check ovn-nbctl lsp-add s1 vm1
 check ovn-nbctl lsp-set-addresses vm1 "00:de:ad:01:00:01 173.0.1.2"
@@ -10764,14 +10169,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -10855,9 +10253,7 @@ check ovn-nbctl lsp-add foo foo4 \
 ADD_NAMESPACES(ext1)
 ADD_VETH(ext1, ext1, br-ext, "192.168.1.5/24", "f0:00:00:01:02:06", \
          "192.168.1.100",)
-check ovn-nbctl lsp-add foo ln -- lsp-set-options ln network_name=provider
-check ovn-nbctl lsp-set-type ln localnet
-check ovn-nbctl lsp-set-addresses ln unknown
+check ovn-nbctl lsp-add-localnet-port foo ln provider
 
 # Logical port 'bar1' in switch 'bar'.
 ADD_NAMESPACES(bar1)
@@ -10934,14 +10330,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11067,14 +10456,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11411,14 +10793,7 @@ TMPPID=$(cat $OVS_RUNDIR/ovn-controller.pid)
 check ovs-appctl -t ovn-controller exit --restart
 OVS_WAIT_WHILE([kill -0 $TMPPID 2>/dev/null])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 AT_CLEANUP
 ])
@@ -11571,14 +10946,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11713,14 +11081,7 @@ acl_test to-lport "" pg
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11754,20 +11115,11 @@ check ovn-nbctl lrp-add ro ro-pub 00:00:00:00:01:01 10.0.0.1/24
 check ovn-nbctl ls-add sw
 check ovn-nbctl lsp-add sw sw-vm1 \
     -- lsp-set-addresses sw-vm1 "00:00:00:00:00:02 192.168.0.2"
-check ovn-nbctl lsp-add sw sw-ro \
-    -- lsp-set-type sw-ro router \
-    -- lsp-set-addresses sw-ro router \
-    -- lsp-set-options sw-ro router-port=ro-sw
+check ovn-nbctl lsp-add-router-port sw sw-ro ro-sw
 
 check ovn-nbctl ls-add pub
-check ovn-nbctl lsp-add pub sw-ln \
-    -- lsp-set-type sw-ln localnet \
-    -- lsp-set-addresses sw-ln unknown \
-    -- lsp-set-options sw-ln network_name=phys
-check ovn-nbctl lsp-add pub pub-ro \
-    -- lsp-set-type pub-ro router \
-    -- lsp-set-addresses pub-ro router \
-    -- lsp-set-options pub-ro router-port=ro-pub
+check ovn-nbctl lsp-add-localnet-port pub sw-ln phys
+check ovn-nbctl lsp-add-router-port pub pub-ro ro-pub
 
 check ovs-vsctl set open . external-ids:ovn-bridge-mappings=phys:br-phys
 
@@ -11802,14 +11154,7 @@ tcp,orig=(src=10.0.0.2,dst=172.16.0.1,sport=<cleared>,dport=<cleared>),reply=(sr
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11841,10 +11186,7 @@ check ovn-nbctl lrp-add lr0 lr0-ls0 00:00:00:00:00:01 fd00::1/64
 check ovn-nbctl ls-add ls0
 check ovn-nbctl lsp-add ls0 vif0 \
     -- lsp-set-addresses vif0 "00:00:00:00:00:02 fd00::2"
-check ovn-nbctl lsp-add ls0 ls0-lr0 \
-    -- lsp-set-type ls0-lr0 router \
-    -- lsp-set-addresses ls0-lr0 router \
-    -- lsp-set-options ls0-lr0 router-port=lr0-ls0
+check ovn-nbctl lsp-add-router-port ls0 ls0-lr0 lr0-ls0
 
 ADD_NAMESPACES(vif0)
 ADD_VETH(vif0, vif0, br-int, "fd00::2/64", "00:00:00:00:00:02", "fd00::1", "nodad")
@@ -11875,14 +11217,7 @@ check_row_count mac_binding 1 mac=\"00:00:00:00:00:02\"
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -11989,14 +11324,7 @@ OVS_WAIT_FOR_OUTPUT([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.1.151) |
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12202,99 +11530,12 @@ OVS_WAIT_UNTIL([check_est_flows 0xa], [check established flows])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
 /connection dropped.*/d"])
 AT_CLEANUP
-
-OVN_FOR_EACH_NORTHD([
-AT_SETUP([load balancing in gateway router - client behind LB with SNAT])
-AT_SKIP_IF([test $HAVE_NC = no])
-AT_KEYWORDS([lb])
-
-ovn_start
-OVS_TRAFFIC_VSWITCHD_START()
-ADD_BR([br-int])
-
-check ovs-vsctl \
-        -- set Open_vSwitch . external-ids:system-id=hv1 \
-        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
-        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
-        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
-        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
-
-start_daemon ovn-controller
-
-check ovn-nbctl lr-add lr \
-    -- set logical_router lr options:chassis=hv1
-check ovn-nbctl lrp-add lr lr-ls1 00:00:00:00:01:00 41.41.41.2/24
-check ovn-nbctl lrp-add lr lr-ls2 00:00:00:00:02:00 42.42.42.2/24
-check ovn-nbctl ls-add ls1
-check ovn-nbctl ls-add ls2
-
-check ovn-nbctl lsp-add ls1 ls1-lr
-check ovn-nbctl lsp-set-addresses ls1-lr 00:00:00:00:01:00
-check ovn-nbctl lsp-set-type ls1-lr router
-check ovn-nbctl lsp-set-options ls1-lr router-port=lr-ls1
-check ovn-nbctl lsp-add ls1 vm1
-check ovn-nbctl lsp-set-addresses vm1 00:00:00:00:00:01
-
-check ovn-nbctl lsp-add ls2 ls2-lr
-check ovn-nbctl lsp-set-addresses ls2-lr 00:00:00:00:02:00
-check ovn-nbctl lsp-set-type ls2-lr router
-check ovn-nbctl lsp-set-options ls2-lr router-port=lr-ls2
-check ovn-nbctl lsp-add ls2 vm2
-check ovn-nbctl lsp-set-addresses vm2 00:00:00:00:00:02
-
-dnl LB using the router IP connected to vm2 as VIP.
-check ovn-nbctl lb-add lb-test 42.42.42.2:8080 41.41.41.1:8080 tcp \
-    -- lr-lb-add lr lb-test
-
-dnl SNAT everything coming from vm1 to the router IP (towards vm2).
-check ovn-nbctl lr-nat-add lr snat 42.42.42.2 41.41.41.1
-
-ADD_NAMESPACES(vm1)
-ADD_VETH(vm1, vm1, br-int, "41.41.41.1/24", "00:00:00:00:00:01", "41.41.41.2")
-
-ADD_NAMESPACES(vm2)
-ADD_VETH(vm2, vm2, br-int, "42.42.42.1/24", "00:00:00:00:00:02", "42.42.42.2")
-
-dnl Start a server on vm2.
-NETNS_DAEMONIZE([vm2], [nc -l -k 42.42.42.1 80], [vm2.pid])
-
-dnl Wait for ovn-controller to catch up.
-wait_for_ports_up
-check ovn-nbctl --wait=hv sync
-
-dnl Test the connection originating something that uses the same source port
-dnl as the LB VIP.
-NS_CHECK_EXEC([vm1], [nc -z -p 8080 42.42.42.1 80], 0, [ignore], [ignore])
-
-OVS_APP_EXIT_AND_WAIT([ovn-controller])
-
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
-
-as
-OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-/connection dropped.*/d"])
-AT_CLEANUP
-])
 
 OVN_FOR_EACH_NORTHD([
 AT_SETUP([load balancing affinity sessions - auto clear learnt flows])
@@ -12318,10 +11559,7 @@ check ovn-nbctl lr-add lr
 check ovn-nbctl lrp-add lr lr-ls 00:00:00:00:01:00 42.42.42.3/24
 check ovn-nbctl ls-add ls
 
-check ovn-nbctl lsp-add ls ls-lr
-check ovn-nbctl lsp-set-addresses ls-lr 00:00:00:00:01:00
-check ovn-nbctl lsp-set-type ls-lr router
-check ovn-nbctl lsp-set-options ls-lr router-port=lr-ls
+check ovn-nbctl lsp-add-router-port ls ls-lr lr-ls
 check ovn-nbctl lsp-add ls vm1
 check ovn-nbctl lsp-set-addresses vm1 00:00:00:00:00:01
 check ovn-nbctl lsp-add ls vm2
@@ -12370,14 +11608,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int | grep 'table=78, n_packets' -c], [1], [dn
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12460,14 +11691,7 @@ NS_CHECK_EXEC([sw1-p0], [ping -q -c 3 -i 0.3 -w 2 172.16.1.100 | FORMAT_PING], \
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12508,10 +11732,7 @@ check ovn-nbctl ls-add sw1
 check ovn-nbctl ls-add pub
 
 # Created localnet port on public switch
-check ovn-nbctl lsp-add pub ln-pub
-check ovn-nbctl lsp-set-type ln-pub localnet
-check ovn-nbctl lsp-set-addresses ln-pub unknown
-check ovn-nbctl lsp-set-options ln-pub network_name=phys
+check ovn-nbctl lsp-add-localnet-port pub ln-pub phys
 
 # Create logical routers and connect them to public switch
 check_uuid ovn-nbctl create Logical_Router name=lr0
@@ -12573,14 +11794,7 @@ wait_row_count MAC_Binding 1 logical_port=lr1-pub ip=172.24.4.100
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12627,10 +11841,7 @@ check ovn-nbctl lsp-add internal internal-lr -- set Logical_Switch_Port internal
 
 check ovn-nbctl lsp-add internal server -- lsp-set-addresses server "unknown"
 
-check ovn-nbctl lsp-add public ln_port \
-                -- lsp-set-addresses ln_port unknown \
-                -- lsp-set-type ln_port localnet \
-                -- lsp-set-options ln_port network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public ln_port phynet
 
 check ovn-nbctl set logical_router lr options:chassis=hv1
 
@@ -12668,14 +11879,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | grep -c "zone=$zone_id"], [0], [2
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12724,28 +11928,16 @@ check ovn-nbctl lsp-add ls2 vm2 -- lsp-set-addresses vm2 "00:00:00:00:02:05 192.
 check ovn-nbctl ls-add ls-pub
 check ovn-nbctl lr-add lr1
 check ovn-nbctl lrp-add lr1 lr1-ls1 00:00:00:00:01:01 192.168.100.1/24
-check ovn-nbctl lsp-add ls1 ls1-lr1                      \
-    -- lsp-set-type ls1-lr1 router                 \
-    -- lsp-set-addresses ls1-lr1 router            \
-    -- lsp-set-options ls1-lr1 router-port=lr1-ls1
+check ovn-nbctl lsp-add-router-port ls1 ls1-lr1 lr1-ls1
 check ovn-nbctl lr-add lr2
 check ovn-nbctl lrp-add lr2 lr2-ls2 00:00:00:00:02:01 192.168.200.1/24
-check ovn-nbctl lsp-add ls2 ls2-lr2                      \
-    -- lsp-set-type ls2-lr2 router                 \
-    -- lsp-set-addresses ls2-lr2 router            \
-    -- lsp-set-options ls2-lr2 router-port=lr2-ls2
+check ovn-nbctl lsp-add-router-port ls2 ls2-lr2 lr2-ls2
 check ovn-nbctl lrp-add lr1 lr1-ls-pub 00:00:00:00:03:01 172.18.2.110/24
 check ovn-nbctl lrp-set-gateway-chassis lr1-ls-pub hv1
-check ovn-nbctl lsp-add ls-pub ls-pub-lr1                      \
-    -- lsp-set-type ls-pub-lr1 router                    \
-    -- lsp-set-addresses ls-pub-lr1 router               \
-    -- lsp-set-options ls-pub-lr1 router-port=lr1-ls-pub
+check ovn-nbctl lsp-add-router-port ls-pub ls-pub-lr1 lr1-ls-pub
 check ovn-nbctl lrp-add lr2 lr2-ls-pub 00:00:00:00:03:02 172.18.1.173/24
 check ovn-nbctl lrp-set-gateway-chassis lr2-ls-pub hv1
-check ovn-nbctl lsp-add ls-pub ls-pub-lr2                      \
-    -- lsp-set-type ls-pub-lr2 router                    \
-    -- lsp-set-addresses ls-pub-lr2 router               \
-    -- lsp-set-options ls-pub-lr2 router-port=lr2-ls-pub
+check ovn-nbctl lsp-add-router-port ls-pub ls-pub-lr2 lr2-ls-pub
 # Putting --add-route on these NAT rules means there is no need to
 # add any static routes.
 check ovn-nbctl --add-route lr-nat-add lr1 dnat_and_snat 172.18.2.11 192.168.100.5
@@ -12770,17 +11962,14 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
 3 packets transmitted, 3 received, 0% packet loss, time 0ms
 ])
 check ovn-nbctl --wait=hv set load_balancer lb0 options:add_route=false
+# Wait for revalidation of stale megaflows which may lag behind.
+check ovs-appctl revalidator/wait
 NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
 [0], [dnl
 7 packets transmitted, 0 received, 100% packet loss, time 0ms
 ])
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
 /connection dropped.*/d"])
@@ -12841,14 +12030,7 @@ NS_CHECK_EXEC([foo], [arping -q -c 3 172.16.1.100])
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -12904,10 +12086,7 @@ ADD_VETH(alice, alice, br-int, "fd11::2/64", "f0:00:00:01:02:03", \
 check ovn-nbctl lsp-add sw alice -- lsp-set-addresses alice "f0:00:00:01:02:03 192.168.1.2 fd11::2"
 
 check ovs-vsctl set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext
-check ovn-nbctl lsp-add public public \
-        -- lsp-set-addresses public unknown \
-        -- lsp-set-type public localnet \
-        -- lsp-set-options public network_name=phynet
+check ovn-nbctl lsp-add-localnet-port public public phynet
 
 ADD_NAMESPACES(gw)
 ADD_VETH(gw0, gw, br-ext, "fd12::2/64", "f0:00:00:01:02:04", \
@@ -12977,14 +12156,7 @@ OVS_WAIT_UNTIL([
 
 OVS_APP_EXIT_AND_WAIT([ovn-controller])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -13081,7 +12253,7 @@ ADD_VETH(bar1, bar1, br-int, "192.168.2.2/24", "f0:00:00:01:02:05", \
 check ovn-nbctl lsp-add bar bar1 \
 -- lsp-set-addresses bar1 "f0:00:00:01:02:05 192.168.2.2"
 
-check ovn-nbctl set logical_router R2 options:lb_force_snat_ip="20.0.0.5"
+check ovn-nbctl set logical_router R2 options:lb_force_snat_ip="20.0.0.2"
 
 AT_CHECK([ovn-nbctl -- create chassis_template_var chassis="hv1" \
           variables="{vip=172.16.1.1,vport1=8000,backends1=\"192.168.1.2:80,192.168.2.2:80\"}"],
@@ -13097,12 +12269,12 @@ check ovn-nbctl --wait=hv sync
 OVS_START_L7([foo1], [http])
 OVS_START_L7([bar1], [http])
 
-NETNS_START_TCPDUMP([foo1], [-neei foo1 src 20.0.0.5 and tcp], [foo1])
-NETNS_START_TCPDUMP([bar1], [-neei bar1 src 20.0.0.5 and tcp], [bar1])
+NETNS_START_TCPDUMP([foo1], [-neei foo1 src 20.0.0.2 and tcp], [foo1])
+NETNS_START_TCPDUMP([bar1], [-neei bar1 src 20.0.0.2 and tcp], [bar1])
 
 check ovs-appctl dpctl/flush-conntrack
 for i in $(seq 10); do
-    NS_EXEC([alice1], [wget 172.16.1.1:8000 -t 5 -T 1 --retry-connrefused -v -o wget$i.log])
+    NS_CHECK_EXEC([alice1], [wget 172.16.1.1:8000 -t 5 -T 1 --retry-connrefused -v -o wget$i.log])
 done
 
 OVS_WAIT_UNTIL([
@@ -13114,22 +12286,15 @@ OVS_WAIT_UNTIL([
     test "${n_pkt}" -ge 1
 ])
 
-AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(20.0.0.5) | \
+AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(20.0.0.2) | \
 sed -e 's/zone=[[0-9]]*/zone=<cleared>/'], [0], [dnl
-tcp,orig=(src=172.16.1.2,dst=192.168.1.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.1.2,dst=20.0.0.5,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
-tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.2.2,dst=20.0.0.5,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
+tcp,orig=(src=172.16.1.2,dst=192.168.1.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.1.2,dst=20.0.0.2,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
+tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.2.2,dst=20.0.0.2,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
 ])
 
 OVN_CLEANUP_CONTROLLER([hv1])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
@@ -13241,18 +12406,693 @@ icmp,orig=(src=192.168.1.2,dst=192.168.1.1,id=<cleared>,type=8,code=0),reply=(sr
 
 OVN_CLEANUP_CONTROLLER([hv1])
 
-as ovn-sb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as ovn-nb
-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
-
-as northd
-OVS_APP_EXIT_AND_WAIT([ovn-northd])
+OVN_CLEANUP_NORTHD
 
 as
 OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
 /connection dropped.*/d"])
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([Distributed gw port CT zone allocation])
+AT_SKIP_IF([test $HAVE_NC = no])
+CHECK_CONNTRACK()
+
+ovn_start
+
+# Topo: vm1 -- ls -- lr  -- ext (with ACLs on ext_lr)
+
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+ADD_BR([br-ext], [set Bridge br-ext fail-mode=standalone])
+
+# Set external-ids in br-int needed for ovn-controller.
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true \
+        -- set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext
+
+start_daemon ovn-controller
+
+# Create logical switches: internal and external networks.
+check ovn-nbctl ls-add ls
+check ovn-nbctl ls-add ext
+
+# Add localnet port to external switch for physical connectivity.
+check ovn-nbctl lsp-add-localnet-port ext ln_port phynet
+
+# Add VM port to internal switch.
+check ovn-nbctl lsp-add ls vm1 \
+    -- lsp-set-addresses vm1 "00:00:00:00:00:11 192.168.100.11"
+
+# Create logical_router_ports: lr_ls and lr_ext.
+check ovn-nbctl lr-add lr
+check ovn-nbctl lrp-add lr lr_ls 00:00:00:00:01:01 192.168.100.1/24
+check ovn-nbctl lrp-add lr lr_ext 00:00:00:00:01:02 172.16.0.1/24
+check ovn-nbctl lrp-set-gateway-chassis lr_ext hv1
+
+# Create peer logical_switch_ports: ls_lr and ext_lr.
+check ovn-nbctl lsp-add ls ls_lr \
+    -- lsp-set-type ls_lr router \
+    -- lsp-set-addresses ls_lr router \
+    -- lsp-set-options ls_lr router-port=lr_ls
+
+check ovn-nbctl lsp-add ext ext_lr \
+    -- lsp-set-type ext_lr router \
+    -- lsp-set-addresses ext_lr router \
+    -- lsp-set-options ext_lr router-port=lr_ext enable_router_port_acl=true
+
+# Create port group for external gateway ACLs.
+check ovn-nbctl pg-add gw_pg ext_lr
+
+# Add ACL rule to enable connection tracking for external gateway traffic
+# allowing ICMP from vm1 to external.
+check ovn-nbctl acl-add gw_pg from-lport 2001 "inport == @gw_pg && ip4  && icmp4" allow-related
+check ovn-nbctl acl-add gw_pg from-lport 1001 "inport == @gw_pg && ip4" drop
+check ovn-nbctl acl-add gw_pg to-lport 1001 "outport == @gw_pg && ip4" drop
+
+# Create namespace vm1.
+ADD_NAMESPACES(vm1)
+ADD_VETH(vm1, vm1, br-int, "192.168.100.11/24", "00:00:00:00:00:11", \
+         "192.168.100.1")
+
+# Create namespace external.
+ADD_NAMESPACES(external)
+ADD_VETH(external, external, br-ext, "172.16.0.100/24", "00:00:00:00:01:10", \
+         "172.16.0.1")
+
+wait_for_ports_up
+check ovn-nbctl --wait=hv sync
+
+# Check that ext_lr has enable_router_port_acl option.
+AT_CHECK([ovn-sbctl get Port_Binding ext_lr options:enable_router_port_acl], [0], [dnl
+"true"
+])
+
+# Check that ls_lr does not have enable_router_port_acl option.
+AT_CHECK([ovn-sbctl --columns options list Port_Binding ls_lr | grep -q enable_router_port_acl], [1], [])
+
+# Check allocated CT zone for ext_lr.
+AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | sed "s/ [[0-9]]*/ ??/"], [0], [stdout])
+AT_CHECK([grep "ext_lr" stdout], [0], [dnl
+ext_lr ??
+])
+
+# Check no CT zone for ls_lr.
+AT_CHECK([grep "ls_lr" stdout], [1], [])
+
+# Generate ICMP traffic to create conntrack entries.
+NS_CHECK_EXEC([vm1], [ping -q -c 2 -W 1 172.16.0.100 | FORMAT_PING], \
+[0], [dnl
+2 packets transmitted, 2 received, 0% packet loss, time 0ms
+])
+
+# Check that ICMP conntrack entries exist.
+zone_id=$(ovn-appctl -t ovn-controller ct-zone-list | grep ext_lr | cut -d ' ' -f2)
+AT_CHECK_UNQUOTED([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.0.100) | grep "zone=$zone_id"], [0], [dnl
+icmp,orig=(src=192.168.100.11,dst=172.16.0.100,id=<cleared>,type=8,code=0),reply=(src=172.16.0.100,dst=192.168.100.11,id=<cleared>,type=0,code=0),zone=$zone_id
+])
+
+# Test TCP traffic - should be blocked by ACLs.
+NETNS_DAEMONIZE([external], [nc -l -k 172.16.0.100 80], [external.pid])
+NS_CHECK_EXEC([vm1], [nc -z 172.16.0.100 80], [1])
+
+# Remove enable_router_port_acl and verify CT zone release.
+check ovn-nbctl lsp-set-options ext_lr router-port=lr_ext
+check ovn-nbctl --wait=sb sync
+AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | grep "ext_lr"], [1], [])
+
+# Re-enable enable_router_port_acl and verify CT zone reallocation.
+check ovn-nbctl lsp-set-options ext_lr router-port=lr_ext enable_router_port_acl=true
+check ovn-nbctl --wait=sb sync
+AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | sed "s/ [[0-9]]*/ ??/"], [0], [stdout])
+AT_CHECK([grep "ext_lr" stdout], [0], [dnl
+ext_lr ??
+])
+
+# Test ICMP traffic still works after dynamic ACL changes
+NS_CHECK_EXEC([vm1], [ping -q -c 2 -W 1 172.16.0.100 | FORMAT_PING], \
+[0], [dnl
+2 packets transmitted, 2 received, 0% packet loss, time 0ms
+])
+
+OVS_APP_EXIT_AND_WAIT([ovn-controller])
+
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d"])
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ACL CT translation - UDP fragmentation])
+AT_KEYWORDS([acl_ct_translation_udp_fragmentation])
+AT_SKIP_IF([test $HAVE_TCPDUMP = no])
+
+CHECK_CONNTRACK()
+
+ovn_start
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+# Start ovn-controller.
+start_daemon ovn-controller
+
+# Set the minimal fragment size for userspace DP.
+ovs-appctl dpctl/ipf-set-min-frag v4 500
+
+check ovn-nbctl ls-add internal
+check ovn-nbctl lsp-add internal client \
+    -- lsp-set-addresses client "f0:00:00:01:02:03 172.16.1.3"
+check ovn-nbctl lsp-add internal server \
+    -- lsp-set-addresses server "f0:00:0f:01:02:03 172.16.1.2"
+
+ADD_NAMESPACES(client)
+ADD_VETH(client, client, br-int, "172.16.1.3/24", "f0:00:00:01:02:03", \
+         "172.16.1.1")
+NS_EXEC([client], [ip l set dev client mtu 900])
+
+ADD_NAMESPACES(server)
+ADD_VETH(server, server, br-int, "172.16.1.2/24", "f0:00:0f:01:02:03", \
+         "172.16.1.1")
+NS_EXEC([server], [ip l set dev server mtu 900])
+
+# Create data file for traffic testing (8000 bytes will be fragmented with MTU 900).
+printf %8000s > datafile
+
+# Create port group with both client and server.
+client_uuid=$(fetch_column nb:logical_switch_port _uuid name=client)
+server_uuid=$(fetch_column nb:logical_switch_port _uuid name=server)
+check ovn-nbctl pg-add internal_vms $client_uuid $server_uuid
+
+# ACL rules - allow outgoing traffic.
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4 && udp" allow-related
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4" allow-related
+
+# ACL rules - allow incoming UDP on specific ports.
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && ip4 && udp && udp.dst == 5060" allow-related
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && ip4 && udp && udp.dst == 5061" allow-related
+
+# Allow ARP.
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && arp" allow-related
+
+# Drop rule.
+check ovn-nbctl --log --severity=info acl-add internal_vms to-lport 100 "outport == @internal_vms" drop
+
+# Enable ACL CT translation for fragmentation handling.
+check ovn-nbctl --wait=hv set NB_Global . options:acl_ct_translation=true
+
+check ovn-nbctl --wait=hv sync
+check ovs-appctl dpctl/flush-conntrack
+
+# Start tcpdump to capture IP fragments on both sides.
+NETNS_START_TCPDUMP([server], [-U -i server -Q in -nn ip and '(ip[[6:2]] & 0x3fff != 0)'], [tcpdump-udp-server])
+NETNS_START_TCPDUMP([client], [-U -i client -Q in -nn ip and '(ip[[6:2]] & 0x3fff != 0)'], [tcpdump-udp-client])
+
+# Start UDP listeners on both sides.
+NETNS_DAEMONIZE([server], [nc -l -u 172.16.1.2 5060 > udp_server.rcvd], [server.pid])
+NETNS_DAEMONIZE([client], [nc -l -u 172.16.1.3 5061 > udp_client.rcvd], [client.pid])
+
+# Client sends to server (will be fragmented due to MTU 900).
+NS_CHECK_EXEC([client], [cat datafile | nc -w 1 -u 172.16.1.2 5060], [0], [ignore], [ignore])
+
+# Server sends to client (will be fragmented due to MTU 900).
+NS_CHECK_EXEC([server], [cat datafile | nc -w 1 -u 172.16.1.3 5061], [0], [ignore], [ignore])
+
+OVS_WAIT_UNTIL([test -s udp_server.rcvd])
+OVS_WAIT_UNTIL([test -s udp_client.rcvd])
+
+# Verify both sides received data.
+check cmp datafile udp_server.rcvd
+check cmp datafile udp_client.rcvd
+
+# Verify IP fragments were received on both sides (at least 5 fragments confirms fragmentation).
+OVS_WAIT_UNTIL([test $(cat tcpdump-udp-server.tcpdump | wc -l) -ge 5])
+OVS_WAIT_UNTIL([test $(cat tcpdump-udp-client.tcpdump | wc -l) -ge 5])
+
+OVN_CLEANUP_CONTROLLER([hv1])
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d
+/WARN|netdev@ovs-netdev: execute.*/d
+/dpif|WARN|system@ovs-system: execute.*/d
+"])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ACL CT translation - TCP traffic])
+AT_KEYWORDS([acl_ct_translation_tcp_fragmentation])
+
+CHECK_CONNTRACK()
+
+ovn_start
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+# Start ovn-controller
+start_daemon ovn-controller
+
+check ovn-nbctl ls-add internal
+check ovn-nbctl lsp-add internal client \
+    -- lsp-set-addresses client "f0:00:00:01:02:03 172.16.1.3"
+check ovn-nbctl lsp-add internal server \
+    -- lsp-set-addresses server "f0:00:0f:01:02:03 172.16.1.2"
+
+ADD_NAMESPACES(client)
+ADD_VETH(client, client, br-int, "172.16.1.3/24", "f0:00:00:01:02:03", \
+         "172.16.1.1")
+
+ADD_NAMESPACES(server)
+ADD_VETH(server, server, br-int, "172.16.1.2/24", "f0:00:0f:01:02:03", \
+         "172.16.1.1")
+
+# Create data file for traffic testing.
+printf %8000s > datafile
+
+# Create port group with both client and server.
+client_uuid=$(fetch_column nb:logical_switch_port _uuid name=client)
+server_uuid=$(fetch_column nb:logical_switch_port _uuid name=server)
+check ovn-nbctl pg-add internal_vms $client_uuid $server_uuid
+
+# ACL rules - allow outgoing traffic.
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4 && tcp" allow-related
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4" allow-related
+
+# ACL rules - allow incoming TCP on specific ports.
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && ip4 && tcp && tcp.dst == 8080" allow-related
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && ip4 && tcp && tcp.dst == 8081" allow-related
+
+# Allow ARP.
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && arp" allow-related
+
+# Drop rule.
+check ovn-nbctl --log --severity=info acl-add internal_vms to-lport 100 "outport == @internal_vms" drop
+
+# Enable ACL CT translation.
+check ovn-nbctl --wait=hv set NB_Global . options:acl_ct_translation=true
+
+check ovn-nbctl --wait=hv sync
+check ovs-appctl dpctl/flush-conntrack
+
+# Test client -> server direction.
+NETNS_DAEMONIZE([server], [nc -l 172.16.1.2 8080 > tcp_server.rcvd], [server.pid])
+NS_CHECK_EXEC([client], [nc -w 1 172.16.1.2 8080 < datafile], [0], [ignore], [ignore])
+
+OVS_WAIT_UNTIL([test -s tcp_server.rcvd])
+check cmp datafile tcp_server.rcvd
+
+# Clean up first direction.
+kill $(cat server.pid) 2>/dev/null || true
+
+# Test server -> client direction.
+NETNS_DAEMONIZE([client], [nc -l 172.16.1.3 8081 > tcp_client.rcvd], [client.pid])
+NS_CHECK_EXEC([server], [nc -w 1 172.16.1.3 8081 < datafile], [0], [ignore], [ignore])
+
+OVS_WAIT_UNTIL([test -s tcp_client.rcvd])
+check cmp datafile tcp_client.rcvd
+
+OVN_CLEANUP_CONTROLLER([hv1])
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d
+"])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ACL CT translation - negative test])
+AT_KEYWORDS([acl_ct_translation_udp_fragmentation_negative])
+AT_SKIP_IF([test $HAVE_TCPDUMP = no])
+
+CHECK_CONNTRACK()
+
+ovn_start
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+# Start ovn-controller
+start_daemon ovn-controller
+
+check ovn-nbctl ls-add internal
+check ovn-nbctl lsp-add internal client \
+    -- lsp-set-addresses client "f0:00:00:01:02:03 172.16.1.3"
+check ovn-nbctl lsp-add internal server \
+    -- lsp-set-addresses server "f0:00:0f:01:02:03 172.16.1.2"
+
+ADD_NAMESPACES(client)
+ADD_VETH(client, client, br-int, "172.16.1.3/24", "f0:00:00:01:02:03", \
+         "172.16.1.1")
+
+ADD_NAMESPACES(server)
+ADD_VETH(server, server, br-int, "172.16.1.2/24", "f0:00:0f:01:02:03", \
+         "172.16.1.1")
+
+# Create port group with both client and server.
+client_uuid=$(fetch_column nb:logical_switch_port _uuid name=client)
+server_uuid=$(fetch_column nb:logical_switch_port _uuid name=server)
+check ovn-nbctl pg-add internal_vms $client_uuid $server_uuid
+
+# ACL rules - allow outgoing traffic.
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4 && udp" allow-related
+check ovn-nbctl acl-add internal_vms from-lport 1002 "inport == @internal_vms && ip4" allow-related
+
+# ACL rules - allow incoming UDP ONLY on port 5060 (NOT 4000).
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && ip4 && udp && udp.dst == 5060" allow-related
+
+# Allow ARP.
+check ovn-nbctl acl-add internal_vms to-lport 1002 "outport == @internal_vms && arp" allow-related
+
+# Drop rule - this should drop traffic on port 4000.
+check ovn-nbctl --log --severity=info acl-add internal_vms to-lport 100 "outport == @internal_vms" drop
+
+# Enable ACL CT translation.
+check ovn-nbctl --wait=hv set NB_Global . options:acl_ct_translation=true
+
+check ovn-nbctl --wait=hv sync
+check ovs-appctl dpctl/flush-conntrack
+
+# Start tcpdump to capture any incoming packets on server.
+NETNS_START_TCPDUMP([server], [-U -i server -Q in -nn udp port 4000], [tcpdump-drop-server])
+
+# Start UDP listener on server (on port 4000 which is NOT allowed by ACLs).
+NETNS_DAEMONIZE([server], [nc -l -u 172.16.1.2 4000 > udp_drop.rcvd], [drop_server.pid])
+
+# Client sends to server on disallowed port.
+NS_CHECK_EXEC([client], [echo "test" | nc -w 1 -u 172.16.1.2 4000], [0], [ignore], [ignore])
+
+# Wait a bit for any packets to arrive.
+sleep 2
+
+# Verify server did NOT receive any data (file should be empty or not exist).
+AT_CHECK([test ! -s udp_drop.rcvd], [0])
+
+# Verify tcpdump captured no packets (traffic was dropped by ACL).
+AT_CHECK([test $(cat tcpdump-drop-server.tcpdump | wc -l) -eq 0], [0])
+
+OVN_CLEANUP_CONTROLLER([hv1])
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d
+"])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ACL CT translation with DHCP traffic])
+AT_KEYWORDS([acl_ct_translation_dhcp])
+AT_SKIP_IF([test $HAVE_DHCPD = no])
+AT_SKIP_IF([test $HAVE_DHCLIENT = no])
+
+CHECK_CONNTRACK()
+
+ovn_start
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+# Start ovn-controller
+start_daemon ovn-controller
+
+# Create logical switch.
+check ovn-nbctl ls-add ls1
+
+# Create DHCP server port.
+check ovn-nbctl lsp-add ls1 dhcp-server \
+    -- lsp-set-addresses dhcp-server "00:00:00:00:02:00 192.168.1.2"
+
+# Create DHCP client port.
+check ovn-nbctl lsp-add ls1 dhcp-client \
+    -- lsp-set-addresses dhcp-client "00:00:00:00:02:01"
+
+# Add OVS ports.
+ADD_NAMESPACES(server, client)
+ADD_VETH(server, server, br-int, "192.168.1.2/24", "00:00:00:00:02:00")
+ADD_VETH(client, client, br-int, "0.0.0.0/0", "00:00:00:00:02:01")
+
+# Bind logical ports to OVS ports.
+check ovs-vsctl set Interface ovs-server external_ids:iface-id=dhcp-server
+check ovs-vsctl set Interface ovs-client external_ids:iface-id=dhcp-client
+
+# Create port group with both ports.
+server_uuid=$(fetch_column nb:logical_switch_port _uuid name=dhcp-server)
+client_uuid=$(fetch_column nb:logical_switch_port _uuid name=dhcp-client)
+check ovn-nbctl pg-add dhcp_vms $server_uuid $client_uuid
+
+# Add ACL rules - allow outgoing traffic from both ports.
+check ovn-nbctl acl-add dhcp_vms from-lport 1002 "inport == @dhcp_vms && ip4" allow-related
+check ovn-nbctl acl-add dhcp_vms from-lport 1002 "inport == @dhcp_vms && udp" allow-related
+
+# Add ACL rules for DHCP traffic (ports 67 and 68).
+check ovn-nbctl acl-add dhcp_vms to-lport 1002 "outport == @dhcp_vms && ip4 && udp && udp.dst == 67" allow-related
+check ovn-nbctl acl-add dhcp_vms to-lport 1002 "outport == @dhcp_vms && ip4 && udp && udp.dst == 68" allow-related
+
+# Allow ARP and broadcast.
+check ovn-nbctl acl-add dhcp_vms to-lport 1002 "outport == @dhcp_vms && arp" allow-related
+
+# Add drop rule.
+check ovn-nbctl --log --severity=info acl-add dhcp_vms to-lport 100 "outport == @dhcp_vms" drop
+
+# Enable ACL CT translation.
+check ovn-nbctl --wait=hv set NB_Global . options:acl_ct_translation=true
+
+# Wait for flows to be installed.
+check ovn-nbctl --wait=hv sync
+
+# Setup DHCP server configuration.
+DHCP_TEST_DIR="$ovs_base/dhcp-test"
+mkdir -p $DHCP_TEST_DIR
+
+cat > $DHCP_TEST_DIR/dhcpd.conf <<EOF
+subnet 192.168.1.0 netmask 255.255.255.0 {
+  range 192.168.1.100 192.168.1.100;
+  option routers 192.168.1.2;
+  option broadcast-address 192.168.1.255;
+  default-lease-time 60;
+  max-lease-time 120;
+}
+EOF
+
+touch $DHCP_TEST_DIR/dhcpd.leases
+chown root:dhcpd $DHCP_TEST_DIR $DHCP_TEST_DIR/dhcpd.leases
+chmod 775 $DHCP_TEST_DIR
+chmod 664 $DHCP_TEST_DIR/dhcpd.leases
+
+# Start dhcpd as DHCP server in the server namespace.
+NETNS_DAEMONIZE([server], [dhcpd -4 -f -cf $DHCP_TEST_DIR/dhcpd.conf server > $DHCP_TEST_DIR/dhcpd.log 2>&1], [dhcpd.pid])
+
+# Give dhcpd time to start.
+sleep 1
+
+# Request IP via DHCP using dhclient.
+NS_CHECK_EXEC([client], [dhclient -1 -v -lf $DHCP_TEST_DIR/dhclient.lease -pf $DHCP_TEST_DIR/dhclient.pid client], [0], [ignore], [ignore])
+# Register cleanup handler to kill dhclient when test exits.
+on_exit 'kill $(cat $DHCP_TEST_DIR/dhclient.pid) 2>/dev/null || true'
+
+# Verify client got an IP address from DHCP.
+NS_CHECK_EXEC([client], [ip addr show client | grep -q "192.168.1.100"], [0])
+
+OVN_CLEANUP_CONTROLLER([hv1])
+
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d
+"])
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([ACL - ICMP unreachable heap overread])
+AT_SKIP_IF([test $HAVE_SCAPY = no])
+
+ovn_start
+
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller.
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+start_daemon ovn-controller
+
+# Create a logical switch with a port and a reject ACL.
+check ovn-nbctl ls-add ls1
+check ovn-nbctl lsp-add ls1 ls1-lp1 \
+    -- lsp-set-addresses ls1-lp1 "f0:00:00:00:00:01 10.0.0.4 fd10::4"
+
+# Add a reject ACL: any traffic to ls1-lp1 gets ICMP Destination Unreachable.
+check ovn-nbctl acl-add ls1 to-lport 1000 "outport == \"ls1-lp1\"" reject
+
+# We need a second port as the "sender".
+check ovn-nbctl lsp-add ls1 ls1-lp2 \
+    -- lsp-set-addresses ls1-lp2 "f0:00:00:00:00:02 10.0.0.5 fd10::5"
+
+ADD_NAMESPACES(ls1-lp1)
+ADD_VETH(ls1-lp1, ls1-lp1, br-int, "fd10::4/96", "f0:00:00:00:00:01", \
+         "fd10::1", "nodad", "10.0.0.4/24", "10.0.0.1")
+
+ADD_NAMESPACES(ls1-lp2)
+ADD_VETH(ls1-lp2, ls1-lp2, br-int, "fd10::5/96", "f0:00:00:00:00:02", \
+         "fd10::1", "nodad", "10.0.0.5/24", "10.0.0.1")
+
+NETNS_START_TCPDUMP([ls1-lp2], [-nnne -i ls1-lp2 icmp or icmp6], [ls1-lp2])
+
+OVN_POPULATE_ARP
+wait_for_ports_up
+check ovn-nbctl --wait=hv sync
+
+# UDP but IP length claims 508 bytes while actual packet is smaller.
+ip netns exec ls1-lp2 scapy -H <<-EOF
+p = Ether(dst='f0:00:00:00:00:01', src='f0:00:00:00:00:02') / \
+    IP(src='10.0.0.5', dst='10.0.0.4', ttl=64, len=508) / \
+    UDP(sport=12345, dport=5050) / \
+    Raw(load=b'AAAA')
+sendp (p, iface='ls1-lp2', loop = 0, verbose = 0, count = 1)
+EOF
+
+# UDP but IPv6 length claims 508 bytes while actual packet is smaller.
+ip netns exec ls1-lp2 scapy -H <<-EOF
+p = Ether(dst='f0:00:00:00:00:01', src='f0:00:00:00:00:02') / \
+    IPv6(src='fd10::5', dst='fd10::4', plen=508) / \
+    UDP(sport=12345, dport=5050) / \
+    Raw(load=b'AAAA')
+sendp (p, iface='ls1-lp2', loop = 0, verbose = 0, count = 1)
+EOF
+
+OVS_WAIT_UNTIL([
+    test "$(grep 'unreachable' -c ls1-lp2.tcpdump)" = "2"
+])
+
+ip4_length=$(grep "ICMP " ls1-lp2.tcpdump | grep "unreachable" | rev | cut -d " " -f1 | rev)
+ip6_length=$(grep "ICMP6" ls1-lp2.tcpdump | grep "unreachable" | rev | cut -d " " -f1 | rev)
+
+check test $ip4_length -eq 40
+check test $ip6_length -eq 60
+
+OVN_CLEANUP_CONTROLLER([hv1])
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d"])
+
+AT_CLEANUP
+])
+
+OVN_FOR_EACH_NORTHD([
+AT_SETUP([DHCPv6 - Options heap overread])
+AT_SKIP_IF([test $HAVE_SCAPY = no])
+
+ovn_start
+
+OVS_TRAFFIC_VSWITCHD_START()
+ADD_BR([br-int])
+
+# Set external-ids in br-int needed for ovn-controller.
+check ovs-vsctl \
+        -- set Open_vSwitch . external-ids:system-id=hv1 \
+        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
+        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
+        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
+        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true
+
+start_daemon ovn-controller
+
+check ovn-nbctl ls-add ls1
+check ovn-nbctl lsp-add ls1 ls1-lp1 \
+    -- lsp-set-addresses ls1-lp1 "f0:00:00:00:00:01 fd10::4"
+
+check_uuid ovn-nbctl -- --id=@opt create DHCP_Options cidr="fd10\:\:/64" \
+    options="\"server_id\"=\"00:00:00:10:00:01\"" \
+    -- set Logical_Switch_Port ls1-lp1 dhcpv6_options=[@opt]
+
+ADD_NAMESPACES(ls1-lp1)
+ADD_VETH(ls1-lp1, ls1-lp1, br-int, "fd10::4/96", "f0:00:00:00:00:01", \
+         "fd10::1", "nodad")
+
+NETNS_START_TCPDUMP([ls1-lp1], [-nnne -i ls1-lp1 udp port 546 and udp port 547], [ls1-lp1])
+
+OVN_POPULATE_ARP
+wait_for_ports_up
+check ovn-nbctl --wait=hv sync
+
+ip netns exec ls1-lp1 scapy -H <<-EOF
+p = Ether(dst='33:33:00:01:00:02', src='f0:00:00:00:00:01') / \
+    IPv6(dst='ff02::1:2', src='fe80::f200:ff:fe00:1') / \
+    UDP(sport=546, dport=547) / \
+    Raw(load=bytes.fromhex( \
+        '01' '010203' \
+        '0003' '000c' '01020304' '00000000' '00000000' \
+        '0001' '0200' \
+        '0003' '0001' \
+        'f00000000001'
+    ))
+sendp (p, iface='ls1-lp1', loop = 0, verbose = 0, count = 1)
+EOF
+
+# ovn-contorller should report a warning that the packet didn't contain valid Client ID.
+OVS_WAIT_UNTIL([grep -q "DHCPv6 option - Client id not present" ovn-controller.log])
+AT_CHECK([grep -q "advertise" ls1-lp1.tcpdump], [1])
+
+OVN_CLEANUP_CONTROLLER([hv1])
+OVN_CLEANUP_NORTHD
+
+as
+OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+/connection dropped.*/d
+/DHCPv6 option - Client id not present.*/d"])
 
 AT_CLEANUP
 ])

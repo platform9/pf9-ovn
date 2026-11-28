@@ -316,6 +316,8 @@ engine_set_node_state_at(struct engine_node *node,
                          enum engine_node_state state,
                          const char *where)
 {
+    ovs_assert(state < EN_STATE_MAX);
+
     if (node->state == state) {
         return;
     }

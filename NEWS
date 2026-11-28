@@ -1,3 +1,31 @@
+OVN v24.03.9 - 16 Jun 2026
+--------------------------
+  - Bug fixes
+
+OVN v24.03.8 - 20 Apr 2026
+--------------------------
+  - Security: Fixed vulnerability CVE-2026-5265.
+  - Security: Fixed vulnerability CVE-2026-5367.
+  - Bug fixes
+  - Add support for special port_security prefix "VRRPv3". This prefix allows
+    CMS to allow all required traffic for a VRRPv3 virtual router behind LSP.
+    See ovn-nb(5) man page for more details.
+  - Fixed support for fragmented traffic in the userspace datapath. Added the
+    "acl_ct_translation" NB_Global option to enable connection tracking
+    based L4 field translation for stateful ACLs. When enabled allows proper
+    handling of IP fragmentation in userspace datapaths. This option may break
+    hardware offloading and is disabled by default.
+  - Added disable_garp_rarp option to logical_router table in order to disable
+    GARP/RARP announcements by all the peer ports of this logical router.
+
+OVN v24.03.7 - 18 Nov 2025
+--------------------------
+  - Bug fixes
+  - Add ovn-nbctl lsp-add-router-port which will create router port on
+    specified LS.
+  - Add ovn-nbctl lsp-add-localnet-port which will create localnet port on
+    specified LS.
+
 OVN v24.03.6 - 13 Jun 2025
 --------------------------
   - Bug fixes
